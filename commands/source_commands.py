@@ -54,8 +54,15 @@ async def process_source_command(
     Process source content using the source_graph workflow
     """
     start_time = time.time()
+    command_id = (
+        str(input_data.execution_context.command_id)
+        if input_data.execution_context
+        else None
+    )
 
     try:
+        from open_notebook.jobs import JobCancelledError, long_job_pulse
+
         logger.info(f"Starting source processing for source: {input_data.source_id}")
         logger.info(f"Notebook IDs: {input_data.notebook_ids}")
         logger.info(f"Transformations: {input_data.transformations}")
@@ -87,21 +94,21 @@ async def process_source_command(
 
         logger.info(f"Updated source {source.id} with command reference")
 
-        # 3. Process source with all notebooks
+        # 3. Process source with all notebooks (long opaque ainvoke — pulse).
         logger.info(f"Processing source with {len(input_data.notebook_ids)} notebooks")
 
-        # Execute source_graph with all notebooks.
-        # LangGraph accepts a partial state dict at runtime, but its typed
-        # overloads require the full state type (langgraph typing limitation).
-        result = await source_graph.ainvoke(  # type: ignore[call-overload]
-            {
-                "content_state": input_data.content_state,
-                "notebook_ids": input_data.notebook_ids,  # Use notebook_ids (plural) as expected by SourceState
-                "apply_transformations": transformations,
-                "embed": input_data.embed,
-                "source_id": input_data.source_id,  # Add the source_id to the state
-            }
-        )
+        async with long_job_pulse(command_id):
+            # LangGraph accepts a partial state dict at runtime, but its typed
+            # overloads require the full state type (langgraph typing limitation).
+            result = await source_graph.ainvoke(  # type: ignore[call-overload]
+                {
+                    "content_state": input_data.content_state,
+                    "notebook_ids": input_data.notebook_ids,
+                    "apply_transformations": transformations,
+                    "embed": input_data.embed,
+                    "source_id": input_data.source_id,
+                }
+            )
 
         processed_source = result["source"]
 
@@ -129,6 +136,9 @@ async def process_source_command(
             processing_time=processing_time,
         )
 
+    except JobCancelledError as e:
+        logger.warning(f"Source processing cancelled: {e}")
+        raise RuntimeError(str(e)) from e
     except ValueError as e:
         # Validation errors are permanent failures. Re-raise so surreal-commands
         # marks the job as `failed` (stop_on=[ValueError] already prevents
@@ -200,8 +210,15 @@ async def run_transformation_command(
     - Does NOT retry permanent failures (ValueError for validation errors)
     """
     start_time = time.time()
+    command_id = (
+        str(input_data.execution_context.command_id)
+        if input_data.execution_context
+        else None
+    )
 
     try:
+        from open_notebook.jobs import JobCancelledError, long_job_pulse
+
         logger.info(
             f"Running transformation {input_data.transformation_id} "
             f"on source {input_data.source_id}"
@@ -219,13 +236,14 @@ async def run_transformation_command(
                 f"Transformation '{input_data.transformation_id}' not found"
             )
 
-        # Run transformation graph (includes LLM call + insight creation).
-        # LangGraph accepts a partial state dict at runtime, but its typed
-        # overloads require the full state type (langgraph typing limitation).
-        await transform_graph.ainvoke(  # type: ignore[call-overload]
-            input=dict(source=source, transformation=transformation),
-            config=RunnableConfig(configurable={"model_id": transformation.model_id}),
-        )
+        # LLM call can run many minutes — pulse + cooperative cancel (#1605).
+        async with long_job_pulse(command_id):
+            await transform_graph.ainvoke(  # type: ignore[call-overload]
+                input=dict(source=source, transformation=transformation),
+                config=RunnableConfig(
+                    configurable={"model_id": transformation.model_id}
+                ),
+            )
 
         processing_time = time.time() - start_time
         logger.info(
@@ -240,6 +258,10 @@ async def run_transformation_command(
             processing_time=processing_time,
         )
 
+    except JobCancelledError as e:
+        processing_time = time.time() - start_time
+        logger.warning(f"Transformation cancelled: {e}")
+        raise RuntimeError(str(e)) from e
     except ValueError as e:
         # Validation errors are permanent failures - don't retry
         processing_time = time.time() - start_time

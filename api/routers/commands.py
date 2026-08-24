@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
@@ -9,6 +9,14 @@ from api.command_service import CommandService
 from open_notebook.exceptions import OpenNotebookError
 
 router = APIRouter()
+
+# HTTP generic submit allowlist (#1606). Typed product routers (podcasts,
+# sources, embeddings, transformations) validate fail-closed and submit via
+# CommandService / submit_command internally. The product UI never POSTs here
+# (only GET list/status). An empty allowlist fails closed so shared-password
+# auth cannot enqueue arbitrary command+input. Extend deliberately if a
+# public RPC client is introduced; do not mirror the full registry.
+PUBLIC_HTTP_COMMAND_ALLOWLIST: FrozenSet[Tuple[str, str]] = frozenset()
 
 
 class CommandExecutionRequest(BaseModel):
@@ -35,28 +43,57 @@ class CommandJobStatusResponse(BaseModel):
     progress: Optional[Dict[str, Any]] = None
 
 
+class ActiveCommandJobResponse(BaseModel):
+    job_id: str
+    name: str = ""
+    app: str = ""
+    status: str
+    error_message: Optional[str] = None
+    created: Optional[str] = None
+    updated: Optional[str] = None
+
+
+@router.get("/commands/jobs", response_model=List[ActiveCommandJobResponse])
+async def list_active_command_jobs(
+    limit: int = Query(50, ge=1, le=100),
+):
+    """List non-terminal command jobs for the ambient activity indicator (#1626)."""
+    try:
+        jobs = await CommandService.list_active_jobs(limit=limit)
+        return [ActiveCommandJobResponse(**job) for job in jobs]
+    except HTTPException:
+        raise
+    except OpenNotebookError:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing active command jobs: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail="Failed to list active command jobs"
+        )
+
+
 @router.post("/commands/jobs", response_model=CommandJobResponse)
 async def execute_command(request: CommandExecutionRequest):
-    """
-    Submit a command for background processing.
-    Returns immediately with job ID for status tracking.
+    """Submit a command for background processing (allowlisted only).
 
-    Example request:
-    {
-        "command": "generate_podcast",
-        "app": "open_notebook",
-        "input": {
-            "episode_profile": "tech_experts",
-            "speaker_profile": "tech_experts",
-            "episode_name": "My Episode",
-            "content": "Content to discuss"
-        }
-    }
+    Product features must use typed routers that validate inputs. This
+    generic RPC is locked to ``PUBLIC_HTTP_COMMAND_ALLOWLIST`` (#1606).
+    GET status/list remain open for polling submitted work.
     """
+    key = (request.app.strip(), request.command.strip())
+    if key not in PUBLIC_HTTP_COMMAND_ALLOWLIST:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Command '{request.app}.{request.command}' is not allowed "
+                f"via POST /commands/jobs. Use the typed API for this "
+                f"operation (podcasts, sources, embeddings)."
+            ),
+        )
+
     try:
-        # Submit command using app name (not module name)
         job_id = await CommandService.submit_command_job(
-            module_name=request.app,  # This should be "open_notebook"
+            module_name=request.app,
             command_name=request.command,
             command_args=request.input,
         )
@@ -93,30 +130,6 @@ async def get_command_job_status(job_id: str):
         logger.error(f"Error fetching job status: {str(e)}")
         raise HTTPException(
             status_code=500, detail="Failed to fetch job status"
-        )
-
-
-@router.get("/commands/jobs", response_model=List[Dict[str, Any]])
-async def list_command_jobs(
-    command_filter: Optional[str] = Query(None, description="Filter by command name"),
-    status_filter: Optional[str] = Query(None, description="Filter by status"),
-    limit: int = Query(50, description="Maximum number of jobs to return"),
-):
-    """List command jobs with optional filtering"""
-    try:
-        jobs = await CommandService.list_command_jobs(
-            command_filter=command_filter, status_filter=status_filter, limit=limit
-        )
-        return jobs
-
-    except HTTPException:
-        raise
-    except OpenNotebookError:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing command jobs: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Failed to list command jobs"
         )
 
 

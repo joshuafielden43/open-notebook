@@ -3,11 +3,46 @@ Async migration system for SurrealDB using the official Python client.
 Based on patterns from sblpy migration system.
 """
 
-from typing import List
+from __future__ import annotations
+
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Iterator, List
 
 from loguru import logger
 
 from .repository import db_connection, repo_query
+
+
+@contextmanager
+def migration_file_lock() -> Iterator[None]:
+    """Serialize migrations across concurrent API processes on one host.
+
+    Uses an exclusive flock on DATA_FOLDER/.migration.lock when fcntl is
+    available (Linux/macOS). On platforms without fcntl, runs unlocked and
+    logs a warning — multi-process Windows starts should use a single migrator.
+    """
+    from open_notebook.config import DATA_FOLDER
+
+    lock_path = Path(DATA_FOLDER) / ".migration.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a+", encoding="utf-8")
+    try:
+        try:
+            import fcntl
+        except ImportError:
+            logger.warning(
+                "fcntl unavailable; migration lock is best-effort only"
+            )
+            yield
+            return
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
 
 
 class AsyncMigration:
@@ -145,6 +180,21 @@ class AsyncMigrationManager:
             AsyncMigration.from_file(
                 "open_notebook/database/migrations/23.surrealql"
             ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/24.surrealql"
+            ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/25.surrealql"
+            ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/26.surrealql"
+            ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/27.surrealql"
+            ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/28.surrealql"
+            ),
         ]
         self.down_migrations = [
             AsyncMigration.from_file(
@@ -216,6 +266,21 @@ class AsyncMigrationManager:
             AsyncMigration.from_file(
                 "open_notebook/database/migrations/23_down.surrealql"
             ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/24_down.surrealql"
+            ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/25_down.surrealql"
+            ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/26_down.surrealql"
+            ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/27_down.surrealql"
+            ),
+            AsyncMigration.from_file(
+                "open_notebook/database/migrations/28_down.surrealql"
+            ),
         ]
         self.runner = AsyncMigrationRunner(
             up_migrations=self.up_migrations,
@@ -241,20 +306,23 @@ class AsyncMigrationManager:
         return current_version < len(self.up_migrations)
 
     async def run_migration_up(self):
-        """Run all pending migrations."""
-        current_version = await self.get_current_version()
-        logger.info(f"Current version before migration: {current_version}")
+        """Run all pending migrations under a host-local exclusive lock."""
+        with migration_file_lock():
+            current_version = await self.get_current_version()
+            logger.info(f"Current version before migration: {current_version}")
 
-        if await self.needs_migration():
-            try:
-                await self.runner.run_all()
-                new_version = await self.get_current_version()
-                logger.info(f"Migration successful. New version: {new_version}")
-            except Exception as e:
-                logger.error(f"Migration failed: {str(e)}")
-                raise
-        else:
-            logger.info("Database is already at the latest version")
+            if await self.needs_migration():
+                try:
+                    await self.runner.run_all()
+                    new_version = await self.get_current_version()
+                    logger.info(
+                        f"Migration successful. New version: {new_version}"
+                    )
+                except Exception as e:
+                    logger.error(f"Migration failed: {str(e)}")
+                    raise
+            else:
+                logger.info("Database is already at the latest version")
 
 
 # Database version management functions

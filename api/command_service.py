@@ -3,9 +3,60 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from surreal_commands import get_command_status, submit_command
 
+from open_notebook.database.repository import repo_query
+
+# Statuses that mean "still in the queue or running" for ambient UI.
+ACTIVE_COMMAND_STATUSES = (
+    "new",
+    "pending",
+    "submitted",
+    "queued",
+    "running",
+    "processing",
+)
+
 
 class CommandService:
     """Generic service layer for command operations"""
+
+    @staticmethod
+    async def list_active_jobs(limit: int = 50) -> List[Dict[str, Any]]:
+        """List command rows that are not yet terminal (for ambient activity UI)."""
+        limit = max(1, min(int(limit), 100))
+        try:
+            # Bind statuses as a list; ORDER BY id keeps the query valid when
+            # created/updated are NONE on fresh surreal-commands rows.
+            result = await repo_query(
+                f"""
+                SELECT id, name, app, status, error_message, created, updated
+                FROM command
+                WHERE status IN $statuses
+                ORDER BY id DESC
+                LIMIT {limit}
+                """,
+                {"statuses": list(ACTIVE_COMMAND_STATUSES)},
+            )
+            jobs: List[Dict[str, Any]] = []
+            for row in result or []:
+                jobs.append(
+                    {
+                        "job_id": str(row.get("id") or ""),
+                        "name": row.get("name") or "",
+                        "app": row.get("app") or "",
+                        "status": str(row.get("status") or "unknown").lower(),
+                        "error_message": row.get("error_message") or None,
+                        "created": str(row["created"])
+                        if row.get("created") is not None
+                        else None,
+                        "updated": str(row["updated"])
+                        if row.get("updated") is not None
+                        else None,
+                    }
+                )
+            return jobs
+        except Exception as e:
+            logger.error(f"Failed to list active command jobs: {e}")
+            raise
 
     @staticmethod
     async def submit_command_job(
@@ -16,13 +67,11 @@ class CommandService:
     ) -> str:
         """Submit a generic command job for background processing"""
         try:
-            # Ensure command modules are imported before submitting
-            # This is needed because submit_command validates against local registry
-            try:
-                import commands.podcast_commands  # noqa: F401
-            except ImportError as import_err:
-                logger.error(f"Failed to import command modules: {import_err}")
-                raise ValueError("Command modules not available")
+            # Ensure all command modules are registered before submit_command
+            # validates against the local registry (#1631).
+            from commands.register import ensure_commands_registered
+
+            ensure_commands_registered()
 
             # surreal-commands expects: submit_command(app_name, command_name, args)
             cmd_id = submit_command(
@@ -68,25 +117,19 @@ class CommandService:
             raise
 
     @staticmethod
-    async def list_command_jobs(
-        module_filter: Optional[str] = None,
-        command_filter: Optional[str] = None,
-        status_filter: Optional[str] = None,
-        limit: int = 50,
-    ) -> List[Dict[str, Any]]:
-        """List command jobs with optional filtering"""
-        # This will be implemented with proper SurrealDB queries
-        # For now, return empty list as this is foundation phase
-        return []
-
-    @staticmethod
     async def cancel_command_job(job_id: str) -> bool:
-        """Cancel a running command job"""
+        """Cancel a running/pending command by marking it failed in SurrealDB.
+
+        surreal-commands has no cooperative cancel; forcing status=failed lets
+        operators retry instead of leaving zombie running rows forever.
+        """
         try:
-            # Implementation depends on surreal-commands cancellation support
-            # For now, just log the attempt
+            from open_notebook.jobs import mark_command_failed
+
             logger.info(f"Attempting to cancel job: {job_id}")
-            return True
+            return await mark_command_failed(
+                job_id, error_message="Job cancelled by operator"
+            )
         except Exception as e:
             logger.error(f"Failed to cancel command job: {e}")
             raise

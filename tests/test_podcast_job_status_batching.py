@@ -47,19 +47,25 @@ class TestGetJobDetailsForCommandsUnit:
             {"id": "command:a", "status": "completed", "error_message": None},
             {"id": "command:b", "status": "failed", "error_message": "boom"},
         ]
-        with patch(
-            "open_notebook.podcasts.models.repo_query",
-            new=AsyncMock(return_value=fake_rows),
-        ) as mock_query:
+        with (
+            patch(
+                "open_notebook.jobs.fail_stale_running_commands",
+                new=AsyncMock(return_value=0),
+            ),
+            patch(
+                "open_notebook.podcasts.models.repo_query",
+                new=AsyncMock(return_value=fake_rows),
+            ) as mock_query,
+        ):
             result = await PodcastEpisode.get_job_details_for_commands(
                 ["command:a", "command:b"]
             )
 
         mock_query.assert_awaited_once()
-        assert result == {
-            "command:a": {"status": "completed", "error_message": None},
-            "command:b": {"status": "failed", "error_message": "boom"},
-        }
+        assert result["command:a"]["status"] == "completed"
+        assert result["command:a"]["error_message"] is None
+        assert result["command:b"]["status"] == "failed"
+        assert result["command:b"]["error_message"] == "boom"
 
     @pytest.mark.asyncio
     async def test_query_failure_returns_empty_dict_rather_than_raising(self):
@@ -72,9 +78,16 @@ class TestGetJobDetailsForCommandsUnit:
 
     @pytest.mark.asyncio
     async def test_falsy_command_ids_are_filtered_out(self):
-        with patch(
-            "open_notebook.podcasts.models.repo_query", new=AsyncMock(return_value=[])
-        ) as mock_query:
+        with (
+            patch(
+                "open_notebook.jobs.fail_stale_running_commands",
+                new=AsyncMock(return_value=0),
+            ),
+            patch(
+                "open_notebook.podcasts.models.repo_query",
+                new=AsyncMock(return_value=[]),
+            ) as mock_query,
+        ):
             # None intentionally violates the signature: the method must filter
             # out falsy ids it can receive from unvalidated DB rows.
             await PodcastEpisode.get_job_details_for_commands(
@@ -82,9 +95,63 @@ class TestGetJobDetailsForCommandsUnit:
             )
 
         # Only the truthy id should reach the query's bound params.
-        _, kwargs_or_args = mock_query.call_args
         bound_vars = mock_query.call_args.args[1]
         assert len(bound_vars["command_ids"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_running_with_error_message_is_reported_failed(self):
+        """#1625: terminal failure must not present as running."""
+        fake_rows = [
+            {
+                "id": "command:dead",
+                "status": "running",
+                "error_message": "quality gate rejected transcript",
+                "updated": "2026-07-27T18:56:00+00:00",
+            },
+        ]
+        with (
+            patch(
+                "open_notebook.jobs.fail_stale_running_commands",
+                new=AsyncMock(return_value=0),
+            ),
+            patch(
+                "open_notebook.podcasts.models.repo_query",
+                new=AsyncMock(return_value=fake_rows),
+            ),
+        ):
+            result = await PodcastEpisode.get_job_details_for_commands(
+                ["command:dead"]
+            )
+
+        assert result["command:dead"]["status"] == "failed"
+        assert "quality gate" in (result["command:dead"]["error_message"] or "")
+
+    @pytest.mark.asyncio
+    async def test_get_job_detail_uses_direct_query_not_library(self):
+        episode = make_episode(command="command:x", suffix="status")
+        fake_rows = [
+            {
+                "id": "command:x",
+                "status": "failed",
+                "error_message": "boom",
+                "updated": "2026-07-27T18:56:00+00:00",
+            }
+        ]
+        with (
+            patch(
+                "open_notebook.jobs.fail_stale_running_commands",
+                new=AsyncMock(return_value=0),
+            ),
+            patch(
+                "open_notebook.podcasts.models.repo_query",
+                new=AsyncMock(return_value=fake_rows),
+            ) as mock_query,
+        ):
+            detail = await episode.get_job_detail()
+
+        mock_query.assert_awaited()
+        assert detail["status"] == "failed"
+        assert detail["error_message"] == "boom"
 
 
 class TestListPodcastEpisodesUsesBatchedLookup:
@@ -188,7 +255,10 @@ class TestListPodcastEpisodesUsesBatchedLookup:
 
     @pytest.mark.asyncio
     async def test_episode_with_neither_command_nor_audio_is_skipped(self):
-        episode = make_episode(command=None, audio_file=None, suffix="incomplete")
+        # Empty shell: no command, no audio, no content → still skipped.
+        episode = make_episode(
+            command=None, audio_file=None, content="", suffix="incomplete"
+        )
 
         with (
             patch(

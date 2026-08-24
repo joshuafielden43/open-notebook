@@ -1,8 +1,6 @@
 import time
 from typing import (
     Any,
-    Awaitable,
-    Callable,
     Dict,
     List,
     Literal,
@@ -13,12 +11,22 @@ from typing import (
 from loguru import logger
 from surreal_commands import CommandInput, CommandOutput, command, submit_command
 
-from open_notebook.ai.models import model_manager
-from open_notebook.database.repository import ensure_record_id, repo_insert, repo_query
-from open_notebook.domain.notebook import Note, Source, SourceInsight
+from open_notebook.ai.runtime import get_embedding
+from open_notebook.database.repository import ensure_record_id, repo_query
+from open_notebook.database.vector_index import drop_vector_indexes
+from open_notebook.embeddings.core import (
+    embed_insight as embed_insight_core,
+)
+from open_notebook.embeddings.core import (
+    embed_note as embed_note_core,
+)
+from open_notebook.embeddings.core import (
+    embed_source as embed_source_core,
+)
+from open_notebook.embeddings.core import (
+    run_embed_job,
+)
 from open_notebook.exceptions import ConfigurationError
-from open_notebook.utils.chunking import ContentType, chunk_text, detect_content_type
-from open_notebook.utils.embedding import generate_embedding, generate_embeddings
 
 # NOTE: `stop_on` below can never trigger in practice — each command catches
 # ValueError internally and returns success=False instead of raising, so the
@@ -42,96 +50,6 @@ def get_command_id(input_data: CommandInput) -> str:
     if input_data.execution_context:
         return str(input_data.execution_context.command_id)
     return "unknown"
-
-
-async def _embed_record(
-    input_data: CommandInput,
-    *,
-    kind: str,
-    record_id: str,
-    embed: Callable[[], Awaitable[Tuple[Dict[str, Any], str]]],
-) -> Tuple[Optional[Dict[str, Any]], float, Optional[str]]:
-    """
-    Shared core for the embed_* commands: run the embedding work with the
-    common logging and error-handling epilogue.
-
-    Args:
-        input_data: The command input (used for command_id logging).
-        kind: Record kind for log messages ("note", "insight", "source").
-        record_id: The record being embedded.
-        embed: Async callable doing the actual load/validate/embed/write work.
-            Returns (extra_output_fields, success_log_detail).
-
-    Returns:
-        (extra_output_fields, processing_time, error_message)
-        extra_output_fields is None and error_message is set on permanent
-        (ValueError) failure. Transient failures re-raise so the retry layer
-        can handle them.
-    """
-    start_time = time.time()
-
-    try:
-        logger.info(f"Starting embedding for {kind}: {record_id}")
-
-        extra_fields, log_detail = await embed()
-
-        processing_time = time.time() - start_time
-        logger.info(
-            f"Successfully embedded {kind} {record_id}{log_detail} in {processing_time:.2f}s"
-        )
-        return extra_fields, processing_time, None
-
-    except ValueError as e:
-        # Permanent failure - don't retry
-        processing_time = time.time() - start_time
-        cmd_id = get_command_id(input_data)
-        logger.error(f"Failed to embed {kind} {record_id} (command: {cmd_id}): {e}")
-        return None, processing_time, str(e)
-    except Exception as e:
-        # Transient failure - will be retried (surreal-commands logs final failure)
-        cmd_id = get_command_id(input_data)
-        logger.debug(
-            f"Transient error embedding {kind} {record_id} (command: {cmd_id}): {e}"
-        )
-        raise
-
-
-async def _embed_markdown_record(
-    input_data: CommandInput,
-    *,
-    label: str,
-    record_id: str,
-    loader: Callable[[str], Awaitable[Any]],
-) -> Tuple[Dict[str, Any], str]:
-    """
-    Load a record, validate its content, embed it as markdown and UPSERT the
-    embedding back onto the record. Shared by embed_note and embed_insight.
-    """
-    # 1. Load record
-    record = await loader(record_id)
-    if not record:
-        raise ValueError(f"{label} '{record_id}' not found")
-
-    if not record.content or not record.content.strip():
-        raise ValueError(f"{label} '{record_id}' has no content to embed")
-
-    # 2. Generate embedding (auto-chunks + mean pools if needed)
-    # Notes and insights are typically markdown content
-    cmd_id = get_command_id(input_data)
-    embedding = await generate_embedding(
-        record.content, content_type=ContentType.MARKDOWN, command_id=cmd_id
-    )
-
-    # 3. UPSERT embedding into the record
-    await repo_query(
-        "UPDATE $record_id SET embedding = $embedding",
-        {
-            "record_id": ensure_record_id(record_id),
-            "embedding": embedding,
-        },
-    )
-
-    return {}, ""
 
 
 class RebuildEmbeddingsInput(CommandInput):
@@ -235,18 +153,17 @@ async def embed_note_command(input_data: EmbedNoteInput) -> EmbedNoteOutput:
     - Does NOT retry permanent failures (ValueError for validation errors)
     """
 
-    async def embed() -> Tuple[Dict[str, Any], str]:
-        return await _embed_markdown_record(
-            input_data,
-            label="Note",
-            record_id=input_data.note_id,
-            loader=Note.get,
-        )
+    cmd_id = get_command_id(input_data)
+    command_id = None if cmd_id == "unknown" else cmd_id
 
-    _, processing_time, error_message = await _embed_record(
-        input_data,
+    async def embed() -> Tuple[Dict[str, Any], str]:
+        await embed_note_core(input_data.note_id, command_id=command_id)
+        return {}, ""
+
+    _, processing_time, error_message = await run_embed_job(
         kind="note",
         record_id=input_data.note_id,
+        command_id=command_id,
         embed=embed,
     )
 
@@ -277,18 +194,17 @@ async def embed_insight_command(input_data: EmbedInsightInput) -> EmbedInsightOu
     - Does NOT retry permanent failures (ValueError for validation errors)
     """
 
-    async def embed() -> Tuple[Dict[str, Any], str]:
-        return await _embed_markdown_record(
-            input_data,
-            label="Insight",
-            record_id=input_data.insight_id,
-            loader=SourceInsight.get,
-        )
+    cmd_id = get_command_id(input_data)
+    command_id = None if cmd_id == "unknown" else cmd_id
 
-    _, processing_time, error_message = await _embed_record(
-        input_data,
+    async def embed() -> Tuple[Dict[str, Any], str]:
+        await embed_insight_core(input_data.insight_id, command_id=command_id)
+        return {}, ""
+
+    _, processing_time, error_message = await run_embed_job(
         kind="insight",
         record_id=input_data.insight_id,
+        command_id=command_id,
         embed=embed,
     )
 
@@ -322,75 +238,19 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
     - Does NOT retry permanent failures (ValueError for validation errors)
     """
 
+    cmd_id = get_command_id(input_data)
+    command_id = None if cmd_id == "unknown" else cmd_id
+
     async def embed() -> Tuple[Dict[str, Any], str]:
-        # 1. Load source
-        source = await Source.get(input_data.source_id)
-        if not source:
-            raise ValueError(f"Source '{input_data.source_id}' not found")
-
-        if not source.full_text or not source.full_text.strip():
-            raise ValueError(f"Source '{input_data.source_id}' has no text to embed")
-
-        # 2. DELETE existing embeddings (idempotency)
-        logger.debug(f"Deleting existing embeddings for source {input_data.source_id}")
-        await repo_query(
-            "DELETE source_embedding WHERE source = $source_id",
-            {"source_id": ensure_record_id(input_data.source_id)},
+        total_chunks = await embed_source_core(
+            input_data.source_id, command_id=command_id
         )
-
-        # 3. Detect content type from file path if available
-        file_path = source.asset.file_path if source.asset else None
-        content_type = detect_content_type(source.full_text, file_path)
-        logger.debug(f"Detected content type: {content_type.value}")
-
-        # 4. Chunk text using appropriate splitter
-        chunks = chunk_text(source.full_text, content_type=content_type)
-        total_chunks = len(chunks)
-
-        # Log chunk statistics for debugging
-        chunk_sizes = [len(c) for c in chunks]
-        logger.info(
-            f"Created {total_chunks} chunks for source {input_data.source_id} "
-            f"(sizes: min={min(chunk_sizes) if chunk_sizes else 0}, "
-            f"max={max(chunk_sizes) if chunk_sizes else 0}, "
-            f"avg={sum(chunk_sizes) // len(chunk_sizes) if chunk_sizes else 0} chars)"
-        )
-
-        if total_chunks == 0:
-            raise ValueError("No chunks created after splitting text")
-
-        # 5. Generate embeddings for all chunks in batches
-        cmd_id = get_command_id(input_data)
-        logger.debug(f"Generating embeddings for {total_chunks} chunks")
-        embeddings = await generate_embeddings(chunks, command_id=cmd_id)
-
-        # Verify we got embeddings for all chunks
-        if len(embeddings) != len(chunks):
-            raise ValueError(
-                f"Embedding count mismatch: got {len(embeddings)} embeddings "
-                f"for {len(chunks)} chunks"
-            )
-
-        # 6. Bulk INSERT source_embedding records
-        records = [
-            {
-                "source": ensure_record_id(input_data.source_id),
-                "order": idx,
-                "content": chunk,
-                "embedding": embedding,
-            }
-            for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings))
-        ]
-
-        logger.debug(f"Inserting {len(records)} source_embedding records")
-        await repo_insert("source_embedding", records)
-
         return {"chunks_created": total_chunks}, f": {total_chunks} chunks"
 
-    extra_fields, processing_time, error_message = await _embed_record(
-        input_data,
+    extra_fields, processing_time, error_message = await run_embed_job(
         kind="source",
         record_id=input_data.source_id,
+        command_id=command_id,
         embed=embed,
     )
 
@@ -632,14 +492,24 @@ async def rebuild_embeddings_command(
         )
         logger.info("=" * 60)
 
-        # Check embedding model availability (fail fast)
-        EMBEDDING_MODEL = await model_manager.get_embedding_model()
+        # Check embedding model availability (fail fast) — runtime seam (#1629)
+        EMBEDDING_MODEL = await get_embedding()
         if not EMBEDDING_MODEL:
             raise ValueError(
                 "No embedding model configured. Please configure one in the Models section."
             )
 
         logger.info(f"Embedding model configured: {EMBEDDING_MODEL}")
+
+        # ADR-014: drop vector indexes before re-embedding. If the model (and
+        # so the dimension) changed, the MTREE index would reject every write;
+        # the scan-based search stays correct meanwhile, and the last drained
+        # embed job re-provisions via reindex_if_drained().
+        try:
+            await drop_vector_indexes()
+            logger.info("Vector indexes dropped for rebuild; will re-provision on drain")
+        except Exception as drop_error:
+            logger.warning(f"Could not drop vector indexes before rebuild: {drop_error}")
 
         # Collect items to process (returns IDs only)
         items = await collect_items_for_rebuild(

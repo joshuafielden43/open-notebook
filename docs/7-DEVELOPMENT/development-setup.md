@@ -287,12 +287,17 @@ uv run pre-commit run ruff --all-files
 **Skipping hooks temporarily:**
 
 ```bash
-# Skip all hooks for a single commit
-git commit --no-verify
-
 # Skip a specific hook (e.g. slow mypy run)
 SKIP=mypy git commit
 ```
+
+This fork also carries the git-hardening secrets guard
+(`claude-config/git-hardening`, installed at `.git/hooks/pre-commit`; the
+pre-commit framework chains it as a legacy hook when both are installed).
+Known-safe token-shaped fixtures — expired presigned URLs and the like — are
+excused via exact, byte-for-byte literals in `.git/secret-allowlist`; never
+substrings or patterns. The guard and its allowlist are not cloned, so
+re-install both after a fresh clone.
 
 **Updating hook versions:**
 

@@ -283,13 +283,13 @@ Get key from: https://jina.ai/
 
 ### Crawl4AI
 
-Renders JavaScript pages in a local Chromium browser — no API key required. Crawl4AI is **optional**: enable it with `OPEN_NOTEBOOK_ENABLE_CRAWL4AI=true` and it installs on first startup (the Chromium download is cached on your data volume). To offload rendering to a remote Crawl4AI server instead — no local install needed:
+Renders JavaScript pages through the deployment's separate Crawl4AI service:
 
 ```env
 CRAWL4AI_API_URL=http://crawl4ai.example.com:11235
 ```
 
-See [Content Processing Engines → Optional engines](../3-USER-GUIDE/content-processing-engines.md#optional-engines-docling--crawl4ai) for details.
+See [Content Processing Engines → Extraction runtime posture](../3-USER-GUIDE/content-processing-engines.md#extraction-runtime-posture) for details.
 
 ---
 

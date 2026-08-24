@@ -17,7 +17,7 @@ export OPEN_NOTEBOOK_CHUNK_OVERLAP=150
 
 ## Embedding (`utils/embedding.py`)
 
-- `generate_embedding(text)` — unified entry point: short text (≤ chunk size) embeds directly; long text is chunked, each chunk embedded, and the results combined via **mean pooling** (normalize each → mean → normalize result, numpy).
+- `generate_embedding(text)` — unified entry point: short text (≤ chunk size) embeds directly; long text is chunked, each chunk embedded, and the results combined via **mean pooling** (normalize each → mean → normalize result, pure Python).
 - `generate_embeddings(texts)` — batch path used by `embed_source_command`: batches of 50 with per-batch retry, to stay under provider payload limits.
 - Empty/whitespace-only input raises `ValueError` — which background commands treat as a permanent (non-retried) failure by design.
 - The embedding model comes from `model_manager` (see [credentials.md](credentials.md) for how provider config is resolved).

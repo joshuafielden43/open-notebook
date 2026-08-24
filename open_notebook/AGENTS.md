@@ -21,9 +21,10 @@ Normative rules for working on the Python backend. Architecture and design ratio
 
 ## AI / model provisioning (`open_notebook/ai/`)
 
-- All LLM calls in graph nodes go through `provision_langchain_model()` — never instantiate provider clients directly. It auto-upgrades to `large_context_model` above 105,000 tokens (hard-coded threshold).
+- Prefer `open_notebook.ai.runtime` (`chat_langchain`, `get_embedding`, `get_tts`, …). Graphs may still import `provision_langchain_model` (shim → `chat_langchain`).
+- Never instantiate provider clients directly. `chat_langchain` auto-upgrades to `large_context` above 105k tokens.
 - Missing/unconfigured model → raise `ConfigurationError` (not `ValueError`) so the API returns 422.
-- Credential-linked models are preferred; `provision_provider_keys()` is the env-var fallback and **mutates `os.environ`** — be aware in tests.
+- Credential resolution uses **config dicts** (`resolve_provider_config` / `Credential.to_esperanto_config`) without mutating `os.environ` when possible. `provision_provider_keys()` still exists for discovery/legacy env-only SDKs.
 - `DefaultModels.get_instance()` intentionally bypasses the singleton cache (fresh DB fetch each call).
 
 ## Graphs (`open_notebook/graphs/`)
@@ -44,19 +45,36 @@ Normative rules for working on the Python backend. Architecture and design ratio
 - `ObjectModel.get()` is polymorphic via ID prefix — the subclass must be imported first or resolution fails.
 - `RecordModel` subclasses are singletons — call `clear_instance()` in tests.
 - Relationship strings passed to `relate()` must match the schema (`reference`, `artifact`, `refers_to`).
+- **Freeze ObjectModel growth:** do not add new use-cases (SurrealQL lists, job submit, cascade policy, context assembly) onto AR classes. Put orchestration in `open_notebook.application`, `open_notebook.jobs`, or `open_notebook.context`. Thin wrappers on domain models that only delegate are fine.
 
 ## Database (`open_notebook/database/`)
 
 - New migration = new file `open_notebook/database/migrations/N.surrealql` (+ `N_down.surrealql`) **and** an edit to `AsyncMigrationManager` — migrations are hard-coded, not auto-discovered. They run automatically on API startup.
-- No connection pooling — each `repo_*` call opens/closes a connection.
+- Connection pool: `repo_*` uses a process-local pool (`OPEN_NOTEBOOK_DB_POOL_SIZE`, default 8).
 - Transaction-conflict `RuntimeError`s are retriable and logged at DEBUG (don't "fix" the missing stack trace).
 - Read the `snl-development:surrealdb-queries` skill notes / SurrealDB docs before writing SurrealQL.
+
+## Jobs (`open_notebook/jobs/`)
+
+- Command lifecycle lives here: recovery, heartbeat, worker readiness — not under `utils/`. Prefer `from open_notebook.jobs import …`.
+- Utils shims remain for old import paths.
+
+## Conversations (`open_notebook/conversations/`)
+
+- Shared LangGraph invoke/get_state + sync/async bridge for chat graphs. Routers use `graph_invoke` / `graph_get_state`; graphs use `run_coroutine_sync` + `get_sqlite_checkpointer`.
+
+## Application (`open_notebook/application/`)
+
+- Use-case helpers between routers and domain (Source status projection, Notebook load). Grow this instead of fattening routers or ObjectModel.
 
 ## Background commands (`commands/`)
 
 - Retry config uses a blocklist: `stop_on: [ValueError]` — raise `ValueError` for permanent failures (no retry, job marked `failed`); any other exception auto-retries.
 - Submission is fire-and-forget via `submit_command()`; commands must be idempotent-ish under retry.
 - Podcast generation uses `max_attempts: 1` on purpose (prevents duplicate episodes); retry is the explicit `POST /podcasts/episodes/{id}/retry` endpoint.
+- Profile readiness for podcasts: `open_notebook.podcasts.orchestration` (shared with API submit).
+- Episode generation job: `open_notebook.podcasts.episode_generation.run_episode_generation` — worker command is a thin adapter.
+- Model triple for podcasts: `open_notebook.ai.runtime.resolve_model_config` (not a private podcast helper).
 
 ## Prompts (`prompts/`)
 

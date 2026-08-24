@@ -107,34 +107,51 @@ export OPENAI_COMPATIBLE_BASE_URL_TTS=http://localhost:8969/v1
 
 ## Available Voices
 
-The Kokoro model includes multiple voices:
+The Kokoro model ships ~50 voices across several accents. Kokoro's own [VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) grades each one — most sit at C/D, a handful reach B. Recommended defaults below.
 
-### Female Voices
-| Voice ID | Description |
-|----------|-------------|
-| `af_bella` | Clear, professional |
-| `af_sarah` | Warm, friendly |
-| `af_nicole` | Energetic, expressive |
+### Recommended defaults (British)
 
-### Male Voices
-| Voice ID | Description |
-|----------|-------------|
-| `am_adam` | Deep, authoritative |
-| `am_michael` | Friendly, conversational |
+| Speaker | Voice ID | Grade |
+|---------|----------|-------|
+| Female | `bf_emma` | **B-** (highest-rated female voice) |
+| Male | `bm_george` | C (best available British male; try blends below) |
 
-### British Accents
-| Voice ID | Description |
-|----------|-------------|
-| `bf_emma` | British female, professional |
-| `bm_george` | British male, formal |
+### Other British options
+| Voice ID | Grade | Notes |
+|----------|-------|-------|
+| `bf_isabella` | C | Alternate female |
+| `bm_fable` | C | Alternate male |
+| `bm_lewis` | D+ | Deeper timbre |
 
-### Test Different Voices
+### Other accents (US female, US male, etc.)
+
+See [VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) for the full list. Common picks: `af_heart` (A grade, US female), `af_bella`, `am_michael`.
+
+### Voice blending
+
+Kokoro supports blending two or more voices in a single request — pass a comma-separated list and the underlying `KokoroPipeline.load_voice` averages the style tensors (`torch.mean(torch.stack(packs), dim=0)`). Useful when a single grade-C voice has artefacts you can smooth out by averaging with a sibling.
 
 ```bash
-for voice in af_bella af_sarah am_adam am_michael; do
+# Blend two British males
+curl "http://localhost:8969/v1/audio/speech" -s \
+  -H "Content-Type: application/json" --output blend.mp3 \
+  --data '{
+    "input": "The forecast is bright with occasional showers.",
+    "model": "speaches-ai/Kokoro-82M-v1.0-ONNX",
+    "voice": "bm_george,bm_fable"
+  }'
+```
+
+Blending is supported by any Kokoro-based server that calls the native `kokoro` package (Speaches, `mlx-audio`, `kokoro-fastapi`). Weighted blends (`voice1:60,voice2:40`) are a `kokoro-tts` / `kokoro-fastapi` extension — the plain `,` form averages 50/50 and works everywhere.
+
+### Test different voices
+
+```bash
+for voice in bf_emma bm_george "bm_george,bm_fable" "bf_emma,bf_isabella"; do
+  fn=$(echo "$voice" | tr "," "+")
   curl "http://localhost:8969/v1/audio/speech" -s \
     -H "Content-Type: application/json" \
-    --output "test_${voice}.mp3" \
+    --output "test_${fn}.mp3" \
     --data "{
       \"input\": \"Hello, this is the ${voice} voice.\",
       \"model\": \"speaches-ai/Kokoro-82M-v1.0-ONNX\",
@@ -197,21 +214,23 @@ Run Speaches on a different machine:
 
 ## Multi-Speaker Podcasts
 
-Configure different voices for each speaker:
+Configure different voices for each speaker (British defaults shown, blends optional):
 
 ```
 Speaker 1 (Host):
   Model: speaches-ai/Kokoro-82M-v1.0-ONNX
-  Voice: af_bella
+  Voice: bf_emma
 
 Speaker 2 (Guest):
   Model: speaches-ai/Kokoro-82M-v1.0-ONNX
-  Voice: am_adam
+  Voice: bm_george
 
-Speaker 3 (Narrator):
+Speaker 3 (Narrator, blend example):
   Model: speaches-ai/Kokoro-82M-v1.0-ONNX
-  Voice: bf_emma
+  Voice: bf_emma,bf_isabella
 ```
+
+The `voice_id` field in `speakers_config.json` (podcast-creator) accepts the same comma-blend syntax — no code change needed to swap presets or try new blends.
 
 ---
 

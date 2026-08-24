@@ -49,8 +49,9 @@ services:
       - "8502:8502"  # Web UI (React frontend)
       - "5055:5055"  # API (required!)
     environment:
-      # Encryption key for credential storage (required)
-      - OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me-to-a-secret-string
+      # Front door + vault (both required; placeholders are refused)
+      - OPEN_NOTEBOOK_PASSWORD=your-unique-login-password
+      - OPEN_NOTEBOOK_ENCRYPTION_KEY=your-unique-encryption-secret
 
       # Database (required)
       - SURREAL_URL=ws://surrealdb:8000/rpc
@@ -86,7 +87,8 @@ services:
 ```
 
 **Edit the file:**
-- Replace `change-me-to-a-secret-string` with your own secret (any string works)
+- Set `OPEN_NOTEBOOK_PASSWORD` (UI/API login) and `OPEN_NOTEBOOK_ENCRYPTION_KEY` (vault) to unique secrets
+- Prefer root `docker-compose.yml` + `.env` and `make check-env` / `make up`
 
 ---
 

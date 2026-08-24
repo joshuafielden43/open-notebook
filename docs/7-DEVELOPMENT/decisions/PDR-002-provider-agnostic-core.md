@@ -25,3 +25,8 @@ Two rules with different lifespans:
 - Triage/design gets a crisp test: "does this only work on provider X?" → needs a PDR, not just an implementation.
 - Feature requests for provider-exclusive capabilities aren't auto-rejected — they're routed to a deliberate decision.
 - Slower adoption of shiny provider features, by design, during the basics-first phase.
+- When agnosticism would impose a *steady-state runtime cost* (not just slower
+  feature adoption), prefer adapting at runtime to what the install actually
+  chose over paying the cost on every operation —
+  [ADR-014](ADR-014-runtime-vector-index.md) (dimension-adaptive vector
+  indexes) is the worked example of that pattern.

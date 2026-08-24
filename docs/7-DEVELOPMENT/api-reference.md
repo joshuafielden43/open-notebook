@@ -134,11 +134,11 @@ curl 'http://localhost:5055/sources?notebook_id=notebook:abc&sort_by=created&sor
 
 ### Async Operations
 
-Some operations (source processing, podcast generation) return immediately with a command ID:
+Source processing and podcast generation return immediately with a command ID:
 
 ```bash
-# Submit async operation
-curl -X POST http://localhost:5055/sources -F async_processing=true
+# Source processing is always queued
+curl -X POST http://localhost:5055/sources -F type=text -F content='Example source'
 # Response: {"id": "source:src001", "command_id": "command:cmd123"}
 
 # Poll status

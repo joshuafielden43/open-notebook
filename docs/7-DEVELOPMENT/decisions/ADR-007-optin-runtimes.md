@@ -1,6 +1,6 @@
 # ADR-007: Heavy extraction runtimes are opt-in, installed at container startup
 
-- **Status**: Accepted
+- **Status**: Superseded in this fork by [PDR-003](PDR-003-fork-install-posture.md)
 - **Date**: 2026-07
 - **Related**: #1122 (this decision), #432/#1118 (Crawl4AI engine), #1104/#1120 (OCR toggle), #975 (pre-flight file support), #374 (offline install), [ADR-002](ADR-002-external-libraries.md) (external libraries), [Content Processing Engines](../../3-USER-GUIDE/content-processing-engines.md)
 
@@ -29,6 +29,7 @@ Baking both into the default image would push it into the multi-GB range and con
 
 - **Bundle both into the default image** — rejected: multi-GB image for a feature most users don't use; wrong for a self-hostable, privacy-first product.
 - **Publish a separate "full" image tag** — rejected for now: doubles the release/registry matrix and forces users to pick an image up front. Revisit if startup-install friction proves too high.
+- **Install-now from Settings (#1623)** — rejected by the fork. Runtime mutation from the API, worker, or container entrypoint makes deploys non-reproducible. Docling is baked into the fixed fork image; Crawl4AI is a separate service.
 - **Persist the whole virtualenv on the volume** (the ComfyUI/Automatic1111 pattern) — rejected: couples the venv to the image's Python version and breaks on upgrades. Persisting only the download caches gets the "no re-download" benefit without that fragility.
 - **Keep Crawl4AI bundled, add only Docling opt-in** — rejected: leaves ~300 MB of Chromium in every image for an engine that is itself optional. Treating both the same way is simpler and leaner.
 

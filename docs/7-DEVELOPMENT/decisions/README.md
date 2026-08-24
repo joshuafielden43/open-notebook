@@ -48,6 +48,13 @@ What this makes easier, what it makes harder, what to watch. (bullets)
 | [ADR-004](ADR-004-background-workers.md) | Long-running work runs on background workers | Accepted |
 | [ADR-005](ADR-005-release-confidence-process.md) | Releases pass a risk-based confidence process, gated on the real image | Accepted |
 | [ADR-006](ADR-006-migration-granularity.md) | Migration granularity follows merge granularity, not release granularity | Accepted |
-| [ADR-007](ADR-007-optin-runtimes.md) | Heavy extraction runtimes (Docling, Crawl4AI local) are opt-in, installed at startup | Accepted |
+| [ADR-007](ADR-007-optin-runtimes.md) | Upstream opt-in runtime installation | Superseded in fork by PDR-003 |
+| [ADR-008](ADR-008-podcast-quality-gate.md) | Reject and repair structurally bad podcast transcripts before publication | Accepted |
+| [ADR-011](ADR-011-vector-index-investigation.md) | Vector search indexing deferred (investigation) | Accepted (investigation outcome); superseded for installs by ADR-014 |
+| [ADR-012](ADR-012-single-episode-audio-element.md) | One audio element per episode card | Accepted |
+| [ADR-013](ADR-013-podcast-creator-orchestration-parked.md) | Open Notebook orchestrates podcast-creator stages (adapter parked) | Accepted |
+| [ADR-014](ADR-014-runtime-vector-index.md) | Dimension-adaptive vector indexes provisioned at runtime | Accepted |
+| [ADR-015](ADR-015-watchdog-birth-certificate.md) | Stale-job reaper stamps newborns instead of killing them | Accepted |
 | [PDR-001](PDR-001-single-user-first.md) | Single-user first; don't preclude multi-user | Accepted |
 | [PDR-002](PDR-002-provider-agnostic-core.md) | Provider-agnostic core by default | Accepted |
+| [PDR-003](PDR-003-fork-install-posture.md) | This fork is an install, not the product | Accepted |

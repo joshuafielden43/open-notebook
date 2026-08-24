@@ -70,7 +70,23 @@ Comprehensive list of all environment variables available in Open Notebook.
 | Variable | Required? | Default | Description |
 |----------|-----------|---------|-------------|
 | `OPEN_NOTEBOOK_EMBEDDING_BATCH_SIZE` | No | 50 | Number of texts sent per embedding batch. Lower this for CPU-only or stricter OpenAI-compatible embedding providers. |
+| `OPEN_NOTEBOOK_CHUNK_SIZE` | No | 400 | Target max chunk size in tokens for embedding splitters. Clamped to 100–8192. Raise for long coherent passages; lower for tiny local embedding windows. |
+| `OPEN_NOTEBOOK_CHUNK_OVERLAP` | No | 15% of `CHUNK_SIZE` | Overlap between consecutive chunks in tokens. Must be `< CHUNK_SIZE`. |
 | `OPEN_NOTEBOOK_MIN_CHUNK_SIZE` | No | 5 | Minimum chunk size in tokens. Chunks below this threshold are dropped before embedding to avoid degenerate single-character fragments that some providers (e.g. llama.cpp) return null embeddings for. Set to `0` to disable filtering. |
+
+Non-default values are logged once when the API/worker process loads chunking config.
+
+---
+
+## Podcast generation
+
+| Variable | Required? | Default | Description |
+|----------|-----------|---------|-------------|
+| `PODCAST_CONTEXT_MAX_CHARS` | No | `120000` | Maximum characters of assembled notebook text submitted to podcast generation. `0` means unlimited. Non-default values are logged at job submit. |
+| `PODCAST_TTS_MAX_TOKENS` | No | unset | When set, max tokens passed into TTS provider config for each speaker (and per-speaker overrides). Logged at job start when set. |
+| `OPEN_NOTEBOOK_STALE_COMMAND_MINUTES` | No | `90` | Minutes without a command heartbeat before a `running`/`processing` job is marked failed. Minimum 5. Logged at podcast job start. |
+
+Related: `OPEN_NOTEBOOK_WORKER_MAX_TASKS` (worker concurrency above) and `ESPERANTO_TTS_TIMEOUT` (TTS below). Podcast generation uses the surreal-commands worker (`make worker-start`).
 
 ---
 
@@ -113,14 +129,11 @@ CORS_ORIGINS=https://notebook.example.com
 | `JINA_API_KEY` | No | None | Jina AI API key for web extraction |
 | `CRAWL4AI_API_URL` | No | None | Base URL of a remote Crawl4AI server. Set this to use Crawl4AI without a local install |
 
-### Optional heavy runtimes (installed on first startup)
+### Extraction runtimes
 
-These are **off by default** to keep the image lean. Setting one to `true` makes the container install that runtime the first time it starts (downloads are cached on the `/app/data` volume, so only the first boot is slow). See [Content Processing Engines → Optional engines](../3-USER-GUIDE/content-processing-engines.md#optional-engines-docling--crawl4ai).
-
-| Variable | Required? | Default | Description |
-|----------|-----------|---------|-------------|
-| `OPEN_NOTEBOOK_ENABLE_DOCLING` | No | `false` | Install Docling on first startup: unlocks the `docling` document engine, the OCR toggle and image sources. Pulls a large ML stack. |
-| `OPEN_NOTEBOOK_ENABLE_CRAWL4AI` | No | `false` | Install the local Crawl4AI runtime + a Chromium browser on first startup: unlocks the `crawl4ai` URL engine. Not needed if `CRAWL4AI_API_URL` is set. |
+This fork bakes Docling into its immutable image. It does not install Python
+packages from the Settings UI or during container startup. Crawl4AI is supplied
+as a separate service through `CRAWL4AI_API_URL`.
 
 **Setup:**
 - Firecrawl: https://firecrawl.dev/

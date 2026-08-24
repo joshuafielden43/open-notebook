@@ -30,10 +30,10 @@ Any string works — it will be securely derived via SHA-256 internally. Use a s
 
 | Setting | Default | Security Level |
 |---------|---------|----------------|
-| Password | None - auth is fully disabled until `OPEN_NOTEBOOK_PASSWORD` is set | Development only |
-| Encryption Key | **None** (must be configured) | Required for API key storage |
+| Password | **Required** — no default; compose/API refuse empty or weak placeholders | Front door |
+| Encryption Key | **Required** — no default; public placeholders refused | Vault for provider keys |
 
-**The encryption key has no default.** You must set `OPEN_NOTEBOOK_ENCRYPTION_KEY` before using the API key configuration feature. Without it, encrypting/decrypting API keys will fail.
+**Both are required for a real install.** `make check-env`, container entrypoint, and API lifespan fail closed unless you set them (lab only: `OPEN_NOTEBOOK_ALLOW_INSECURE_DEFAULTS=1`).
 
 ### Docker Secrets Support
 
@@ -66,12 +66,14 @@ environment:
 ## When to Use Password Protection
 
 ### Use it for:
-- Public cloud deployments (PikaPods, Railway, DigitalOcean)
-- Shared network environments
-- Any deployment accessible beyond localhost
+- **Every real deployment** — including localhost. The password is the front door, not optional chrome.
+- Public cloud, shared LAN, and reverse-proxy setups
 
-### You can skip it for:
-- Local development on your machine
+### Lab only:
+- Automated tests / throwaway boxes with `OPEN_NOTEBOOK_ALLOW_INSECURE_DEFAULTS=1`
+
+### Behind a reverse proxy:
+- Set `OPEN_NOTEBOOK_TRUSTED_PROXIES` to the proxy's peer IP(s) if auth rate limits should use `X-Forwarded-For`. Without it, only the TCP peer is used (client-supplied XFF is ignored).
 - Private, isolated networks
 - Single-user local setups
 

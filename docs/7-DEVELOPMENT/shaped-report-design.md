@@ -4,7 +4,8 @@
 
 **Edge:** report v1, `for_report`, jobs/pulse, podcast segment discipline, evidence-as-budget prompt, multi-model defaults.
 
-**Roast:** average **8.7** (GO). See [shaped-report-roast.md](./shaped-report-roast.md).  
+**Roast:** average **8.7** (GO). See [shaped-report-roast.md](./shaped-report-roast.md).
+
 **Amended:** post-critique (context scale, cohesion, partial resilience, local-model I/O, omit transparency); fine-tune (L7 small-N math, map concurrency, tolerant tag parse).
 
 ## Product promise
@@ -155,37 +156,37 @@ Omits must look intentional, not like a generation bug.
 
 ## What we steal (no install)
 
-- STORM: pre-write then write; outline tree; section populate; citation objects  
-- Podcast: bounded segment jobs + shared structure  
-- ADR-008 lesson: **no** metric-driven auto-regen loops that pad  
-- Mermaid over Excalidraw for diagrams  
+- STORM: pre-write then write; outline tree; section populate; citation objects
+- Podcast: bounded segment jobs + shared structure
+- ADR-008 lesson: **no** metric-driven auto-regen loops that pad
+- Mermaid over Excalidraw for diagrams
 
 ## What we refuse
 
-- `pip install knowledge-storm`  
-- n8n / SearXNG / Firecrawl as report brain  
-- Excalidraw  
-- Per-request dual-run cost tax  
-- Multi-agent discourse UI  
-- Single corpus-wide LLM extract over the whole notebook  
+- `pip install knowledge-storm`
+- n8n / SearXNG / Firecrawl as report brain
+- Excalidraw
+- Per-request dual-run cost tax
+- Multi-agent discourse UI
+- Single corpus-wide LLM extract over the whole notebook
 
 ## Implementation order
 
-1. Keep improving standard path (packing + prompt) — measure residual falloff.  
-2. Per-source ledger map + merge/dedupe + XML parse.  
-3. Outline-from-ledger + L4 early omit + thesis + audit footer fields.  
-4. Deep section loop + L7/L8 + shared thesis (behind `mode=deep`).  
-5. Offline density gate suite on fixed notebooks before recommending deep.  
-6. Mermaid last.  
+1. Keep improving standard path (packing + prompt) — measure residual falloff.
+2. Per-source ledger map + merge/dedupe + XML parse.
+3. Outline-from-ledger + L4 early omit + thesis + audit footer fields.
+4. Deep section loop + L7/L8 + shared thesis (behind `mode=deep`).
+5. Offline density gate suite on fixed notebooks before recommending deep.
+6. Mermaid last.
 
 ## Success metrics
 
-1. Standard path remains best default for thin/medium notebooks.  
-2. Deep path wins offline density gate on stocked notebooks before marketing as “better.”  
-3. Hobbyist can run deep with only existing worker + chat model.  
-4. No new services.  
-5. Large notebooks (30+ sources) complete ledger map without one mega-context extract.  
-6. Audit footer always explains omits/drops when deep succeeds.  
+1. Standard path remains best default for thin/medium notebooks.
+2. Deep path wins offline density gate on stocked notebooks before marketing as “better.”
+3. Hobbyist can run deep with only existing worker + chat model.
+4. No new services.
+5. Large notebooks (30+ sources) complete ledger map without one mega-context extract.
+6. Audit footer always explains omits/drops when deep succeeds.
 
 ## Stance
 

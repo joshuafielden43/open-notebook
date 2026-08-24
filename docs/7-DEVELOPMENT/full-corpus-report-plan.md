@@ -1,8 +1,11 @@
 # Plan: Full-corpus reports (ledger + STORM write)
 
-**Status:** Plan for feedback — revised after deep critique (2026-07). Not a build ticket, not an ADR.  
-**Audience:** Anyone reviewing product/architecture direction before more implementation.  
-**Related:** [shaped-report-design.md](./shaped-report-design.md) (L1–L8), [shaped-report-roast.md](./shaped-report-roast.md) (GO 8.7), `open_notebook/reports/ledger.py` (L1 prototype).  
+**Status:** Plan for feedback — revised after deep critique (2026-07). Not a build ticket, not an ADR.
+
+**Audience:** Anyone reviewing product/architecture direction before more implementation.
+
+**Related:** [shaped-report-design.md](./shaped-report-design.md) (L1–L8), [shaped-report-roast.md](./shaped-report-roast.md) (GO 8.7), `open_notebook/reports/ledger.py` (L1 prototype).
+
 **Date:** 2026-07
 
 ---
@@ -25,7 +28,8 @@ Open Notebook already holds the user’s stocked corpus. Report generation does 
 - SurrealDB replacement (does not change model-read cost of a full shelf).
 - Memo length for its own sake.
 
-**One-line problem statement:**  
+**One-line problem statement:**
+
 Reports under-use a fat notebook by packing a small, uncontrolled subset of stocked blocks; the user will not groom hundreds of sources to compensate.
 
 ---
@@ -77,13 +81,16 @@ On a notebook with on the order of **hundreds** of stocked sources/notes, the mu
 | **Measurement (ledger)** | **No** — extract for reuse across reports | Content identity of body (+ insights if included), **not** report instructions | Rich retained units with provenance |
 | **Selection / outline** | **Yes** — this report’s instructions | Ephemeral per job (or cache by content + instructions if we later want) | Rank, allocate, omit for *this* ask |
 
-**Why not intent-aware extraction only:**  
+**Why not intent-aware extraction only:**
+
 Three generic snippets optimized for one question cannot be both a **reusable cache** and support arbitrary later reports (“compare failure modes” vs “list integrations”). Intent in the map step forces either (a) re-map every report (destroy cache) or (b) wrong evidence for the next ask.
 
-**Why not “1–3 generic snippets forever”:**  
+**Why not “1–3 generic snippets forever”:**
+
 Eligible ≠ useful. Sampling **inside** each document recreates the 5% problem at chunk scale. The inventory must be **rich enough** that intent-aware selection has material to choose from (chunk- or claim-level units, not a handful of generic lines per source). Exact richness (nuggets per chunk, max units per source) is a design parameter; the plan requires it be **specified and bounded**, not left as “1–3 forever.”
 
-**Claim-level provenance (required for cache + multi-source truth):**  
+**Claim-level provenance (required for cache + multi-source truth):**
+
 Dedupe collapses **claim text**, not **supporting sources**. Same normalized claim from source A and B → one claim node, **refs = {A, B}**. Global first-source-wins that drops B is **wrong** (order-dependent cache, lost corroboration). Landed prototype behavior is a known defect relative to this plan.
 
 ---
@@ -104,14 +111,16 @@ Dedupe collapses **claim text**, not **supporting sources**. Same normalized cla
 
 **Live calibration (prototype, n8n):** ~279 eligible, ~43 batches, ~0.9M batch-body tokens, ~18 min sequential cloud chat — proves map cost scale; does **not** prove useful coverage or survival through write.
 
-**What Layer A fixes:** silent **notebook-level** under-sampling.  
+**What Layer A fixes:** silent **notebook-level** under-sampling.
+
 **What it does not fix alone:** intent usefulness, allocation, used evidence, or a coherent memo.
 
 ### Layer B — Write: STORM-shaped manufacturing on the ledger
 
 **Role:** Factorized write under partial context so the memo can be grounded in a wide inventory without one mega-prompt and without grooming 300 titles.
 
-**STORM, stripped:** discover → outline → section populate → assemble.  
+**STORM, stripped:** discover → outline → section populate → assemble.
+
 **Here:** web discover/crawl **deleted**. Measurement is the ledger. STORM is **write control**, not inherited validation of Stanford STORM (which also used perspective discovery and question-driven research).
 
 | Stage | Input | Output | Hard rule |
@@ -125,7 +134,8 @@ Dedupe collapses **claim text**, not **supporting sources**. Same normalized cla
 | Section jobs | Thesis + TOC + **that section’s units only** | Markdown | Scoped; token-bounded inputs |
 | Assemble | Sections + sources + audit | **One** AI note | Idempotent publish (see §8) |
 
-**Evidence-survival invariant (minimum):**  
+**Evidence-survival invariant (minimum):**
+
 After outline validation, there is no “orphaned retained unit” without an omit reason, and no section assignment that references a non-existent unit. Generation must not invent citations outside assigned units. Audit must be able to state survival counts without hand inspection.
 
 ---

@@ -1,7 +1,9 @@
 # Roast result: Shaped report design (Open Notebook)
 
-**Customer lens (required):** hobbyist nerd / adjacent self-hoster of research tooling  
-**Artifact roasted:** [shaped-report-design.md](./shaped-report-design.md)  
+**Customer lens (required):** hobbyist nerd / adjacent self-hoster of research tooling
+
+**Artifact roasted:** [shaped-report-design.md](./shaped-report-design.md)
+
 **Skill:** `/Users/jcf/.claude/skills/roast/SKILL.md`
 
 ## Iteration history
@@ -31,7 +33,8 @@ Confidence: **high**
 
 **Why:** Council tension was “multi-stage is theater / tax” vs “one-shot cannot fix falloff on fat notebooks.” Dual-mode resolves it: cheap path for thin/weeknight, deep path when the user chooses density. Evidence-first order + hard early omit + offline ship gate keep deep honest without dual-run bills.
 
-**Biggest risk:** Deep still feels like a black-box longer wait without inspectable outline/omit reasons.  
+**Biggest risk:** Deep still feels like a black-box longer wait without inspectable outline/omit reasons.
+
 **Biggest upside:** Notebook-native manufacturing line that competes with NotebookLM *outputs* on owned corpus without crawl OS.
 
 **Money read:** Free/self-host; cost is tokens/time user already budgets. Time-to-value: standard path already shipped; deep is weeks of in-repo work, not a new product company. Hobbyist ships when worker + chat model already configured.

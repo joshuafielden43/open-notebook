@@ -33,6 +33,7 @@ import {
   SourceMode,
   getSourceDefaultMode,
   hasSelections,
+  isFullNotebookSelection,
   selectionsToContextConfigs,
 } from './generate-podcast-selection'
 
@@ -41,9 +42,18 @@ const TOKEN_COUNT_DEBOUNCE_MS = 400
 interface GeneratePodcastDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * When set (e.g. opened from a notebook page), expand that notebook and
+   * stamp its id on the generation request so the episode is scoped.
+   */
+  defaultNotebookId?: string
 }
 
-export function GeneratePodcastDialog({ open, onOpenChange }: GeneratePodcastDialogProps) {
+export function GeneratePodcastDialog({
+  open,
+  onOpenChange,
+  defaultNotebookId,
+}: GeneratePodcastDialogProps) {
   const { t } = useTranslation()
   const { toast } = useToast()
   const [expandedNotebooks, setExpandedNotebooks] = useState<string[]>([])
@@ -69,11 +79,23 @@ export function GeneratePodcastDialog({ open, onOpenChange }: GeneratePodcastDia
     [episodeProfilesQuery.episodeProfiles]
   )
 
-  // Fetch sources and notes for notebooks using useQueries
+  // From a notebook page: expand that notebook so its sources/notes load and
+  // the existing init effect selects them by default.
+  useEffect(() => {
+    if (!open || !defaultNotebookId) {
+      return
+    }
+    setExpandedNotebooks((prev) =>
+      prev.includes(defaultNotebookId) ? prev : [...prev, defaultNotebookId]
+    )
+  }, [open, defaultNotebookId])
+
+  // Full notebook inventories — page through the API ceiling so a large
+  // notebook is never truncated to the default first-page 50.
   const sourcesQueries = useQueries({
     queries: notebooks.map((notebook) => ({
-      queryKey: QUERY_KEYS.sources(notebook.id),
-      queryFn: () => sourcesApi.list({ notebook_id: notebook.id }),
+      queryKey: QUERY_KEYS.sourcesAll(notebook.id),
+      queryFn: () => sourcesApi.listAllForNotebook(notebook.id),
       enabled:
         open &&
         (expandedNotebooks.includes(notebook.id) || hasSelections(selections[notebook.id])),
@@ -82,8 +104,8 @@ export function GeneratePodcastDialog({ open, onOpenChange }: GeneratePodcastDia
 
   const notesQueries = useQueries({
     queries: notebooks.map((notebook) => ({
-      queryKey: QUERY_KEYS.notes(notebook.id),
-      queryFn: () => notesApi.list({ notebook_id: notebook.id }),
+      queryKey: QUERY_KEYS.notesAll(notebook.id),
+      queryFn: () => notesApi.listAllForNotebook(notebook.id),
       enabled:
         open &&
         (expandedNotebooks.includes(notebook.id) || hasSelections(selections[notebook.id])),
@@ -370,7 +392,12 @@ export function GeneratePodcastDialog({ open, onOpenChange }: GeneratePodcastDia
           context_config: task.contextConfig,
         })
         const notebookName = notebooks.find((nb) => nb.id === task.notebookId)?.name ?? task.notebookId
-        const contextString = JSON.stringify(response.context, null, 2)
+        // Prefer server plain text. Never pretty-print the structured tree —
+        // JSON.stringify(context, null, 2) on ~hundreds of sources pegs a core
+        // and freezes the tab (beach ball) before /podcasts/generate is even called.
+        const contextString =
+          (response.content && response.content.trim()) ||
+          JSON.stringify(response.context)
         const snippet = `${t('common.notebookLabel', { name: notebookName })}\n${contextString}`
         parts.push(snippet)
       } catch (error) {
@@ -416,16 +443,47 @@ export function GeneratePodcastDialog({ open, onOpenChange }: GeneratePodcastDia
       return
     }
 
+    const selectedConfigs = selectionsToContextConfigs(selections)
+    if (selectedConfigs.length === 0) {
+      toast({
+        title: t('podcasts.addContext'),
+        description: t('podcasts.addContextDesc'),
+        variant: 'destructive',
+      })
+      return
+    }
+
+    // Prefer the notebook this dialog was opened from; otherwise stamp the
+    // sole selected notebook so free-form multi-notebook jobs stay unscoped.
+    const notebookIdForScope =
+      defaultNotebookId ??
+      (selectedConfigs.length === 1 ? selectedConfigs[0].notebookId : undefined)
+
+    // Whole single notebook selected → server assembles via for_podcast.
+    // Skips client buildContext + stringify (the beach-ball path on large NBs).
+    const soleNotebookId =
+      selectedConfigs.length === 1 ? selectedConfigs[0].notebookId : undefined
+    const useServerAssembly =
+      !!soleNotebookId &&
+      isFullNotebookSelection(
+        selections[soleNotebookId],
+        sourcesByNotebook[soleNotebookId] ?? [],
+        notesByNotebook[soleNotebookId] ?? [],
+      )
+
     setIsBuildingContext(true)
     try {
-      const content = await buildContentFromSelections()
-      if (!content.trim()) {
-        toast({
-          title: t('podcasts.addContext'),
-          description: t('podcasts.addContextDesc'),
-          variant: 'destructive',
-        })
-        return
+      let content: string | undefined
+      if (!useServerAssembly) {
+        content = await buildContentFromSelections()
+        if (!content.trim()) {
+          toast({
+            title: t('podcasts.addContext'),
+            description: t('podcasts.addContextDesc'),
+            variant: 'destructive',
+          })
+          return
+        }
       }
 
       const payload: PodcastGenerationRequest = {
@@ -433,6 +491,7 @@ export function GeneratePodcastDialog({ open, onOpenChange }: GeneratePodcastDia
         speaker_profile: speakerProfileRef,
         episode_name: episodeName.trim(),
         content,
+        notebook_id: notebookIdForScope ?? soleNotebookId,
         briefing_suffix: instructions.trim() ? instructions.trim() : undefined,
       }
 
@@ -459,12 +518,16 @@ export function GeneratePodcastDialog({ open, onOpenChange }: GeneratePodcastDia
     }
   }, [
     buildContentFromSelections,
+    defaultNotebookId,
     episodeName,
     generatePodcast,
     instructions,
+    notesByNotebook,
     onOpenChange,
     resetState,
     selectedEpisodeProfile,
+    selections,
+    sourcesByNotebook,
     toast,
     t,
   ])

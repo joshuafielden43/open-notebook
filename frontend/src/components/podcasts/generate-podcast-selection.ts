@@ -47,6 +47,31 @@ export function getSourceDefaultMode(source: SourceListResponse): SourceMode {
 }
 
 /**
+ * True when every known source/note for the notebook is included (not off).
+ * In that case generate can pass notebook_id alone and let the server assemble
+ * context — avoiding a client-side mega JSON.stringify that pegs the CPU.
+ */
+export function isFullNotebookSelection(
+  selection: NotebookSelection | undefined,
+  sources: { id: string }[],
+  notes: { id: string }[],
+): boolean {
+  if (!selection) {
+    return false
+  }
+  if (sources.length === 0 && notes.length === 0) {
+    return false
+  }
+  const sourcesOk =
+    sources.length === 0 ||
+    sources.every((s) => selection.sources[s.id] && selection.sources[s.id] !== 'off')
+  const notesOk =
+    notes.length === 0 ||
+    notes.every((n) => selection.notes[n.id] && selection.notes[n.id] !== 'off')
+  return sourcesOk && notesOk
+}
+
+/**
  * Convert the per-notebook selection state into build-context configs,
  * skipping notebooks with no active selections.
  */

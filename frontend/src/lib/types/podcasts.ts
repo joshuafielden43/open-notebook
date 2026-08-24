@@ -75,12 +75,25 @@ export interface Language {
   name: string
 }
 
+export type PodcastGenerationStage =
+  | 'queued'
+  | 'outline'
+  | 'transcript'
+  | 'tts'
+  | 'combine'
+  | 'completed'
+  | 'failed'
+  | 'unknown'
+  | string
+
 export interface PodcastEpisode {
   id: string
   name: string
   episode_profile: EpisodeProfileSnapshot
   speaker_profile: SpeakerProfileSnapshot
   briefing: string
+  /** Notebook that sourced context; null for free-form or pre-scoping rows */
+  notebook_id?: string | null
   audio_file?: string | null
   audio_url?: string | null
   transcript?: Record<string, unknown> | null
@@ -88,6 +101,16 @@ export interface PodcastEpisode {
   created?: string | null
   job_status?: EpisodeStatus | null
   error_message?: string | null
+  generation_stage?: PodcastGenerationStage | null
+}
+
+export interface PodcastGenerationResponse {
+  job_id: string
+  status: string
+  message: string
+  episode_profile: string
+  episode_name: string
+  worker_likely_ready?: boolean | null
 }
 
 export interface PodcastGenerationRequest {
@@ -98,14 +121,6 @@ export interface PodcastGenerationRequest {
   content?: string
   notebook_id?: string
   briefing_suffix?: string | null
-}
-
-export interface PodcastGenerationResponse {
-  job_id: string
-  status: string
-  message: string
-  episode_profile: string
-  episode_name: string
 }
 
 export type EpisodeStatusGroup = 'running' | 'completed' | 'failed' | 'pending'

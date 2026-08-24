@@ -67,6 +67,9 @@ export interface Capabilities {
   docling_available: boolean
   crawl4ai_available: boolean
   crawl4ai_remote_configured: boolean
+  worker_likely_ready?: boolean
+  pending_command_count?: number
+  running_command_count?: number
 }
 
 export interface CreateNotebookRequest {
@@ -116,7 +119,7 @@ export interface CreateSourceRequest {
   transformations?: string[]
   embed?: boolean
   delete_source?: boolean
-  // New async processing support
+  // Deprecated compatibility flag; source processing is always queued.
   async_processing?: boolean
 }
 
@@ -247,6 +250,8 @@ export interface BuildContextResponse {
   }
   token_count: number
   char_count: number
+  /** Server-assembled plain text — use this instead of stringifying `context`. */
+  content?: string
 }
 
 export interface RecentlyViewedResponse {

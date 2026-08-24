@@ -15,10 +15,19 @@ interface ChatColumnProps {
   notebookId: string
   contextSelections: ContextSelections
   sources: SourceListResponse[]
+  /** First page only — gate the empty shell, not full inventory. */
   sourcesLoading: boolean
+  /** Auto-drain still running; token counts / send wait for this. */
+  sourcesLoadingFull?: boolean
 }
 
-export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoading }: ChatColumnProps) {
+export function ChatColumn({
+  notebookId,
+  contextSelections,
+  sources,
+  sourcesLoading,
+  sourcesLoadingFull = false,
+}: ChatColumnProps) {
   const { t } = useTranslation()
 
   // Fetch notes for this notebook
@@ -29,7 +38,8 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
     notebookId,
     sources,
     notes,
-    contextSelections
+    contextSelections,
+    sourcesInventoryComplete: !sourcesLoadingFull && !notesLoading,
   })
 
   // Calculate context stats for indicator
@@ -65,8 +75,8 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
     }
   }, [sources, notes, contextSelections, chat.tokenCount, chat.charCount])
 
-  // Show loading state while sources/notes are being fetched
-  if (sourcesLoading || notesLoading) {
+  // Only block on the first sources page — not the full 274-item drain.
+  if (sourcesLoading && sources.length === 0) {
     return (
       <Card className="h-full flex flex-col">
         <CardContent className="flex-1 flex items-center justify-center">

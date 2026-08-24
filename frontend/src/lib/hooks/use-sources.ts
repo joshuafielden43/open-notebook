@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
-import { useCallback, useMemo } from 'react'
-import { sourcesApi } from '@/lib/api/sources'
+import { useCallback, useEffect, useMemo } from 'react'
+import { SOURCES_PAGE_MAX, sourcesApi } from '@/lib/api/sources'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -8,17 +8,22 @@ import { getApiErrorMessage } from '@/lib/utils/error-handler'
 import {
   CreateSourceRequest,
   UpdateSourceRequest,
-  SourceResponse,
   SourceStatusResponse,
   SourceListResponse
 } from '@/lib/types/api'
 
-const NOTEBOOK_SOURCES_PAGE_SIZE = 30
+// Page at the API ceiling so fewer round-trips for large notebooks.
+const NOTEBOOK_SOURCES_PAGE_SIZE = SOURCES_PAGE_MAX
 
 export function useSources(notebookId?: string) {
   return useQuery({
     queryKey: QUERY_KEYS.sources(notebookId),
-    queryFn: () => sourcesApi.list({ notebook_id: notebookId }),
+    // Full inventory when scoped — chat context and bulk actions must not
+    // silently omit sources past the default first page.
+    queryFn: () =>
+      notebookId
+        ? sourcesApi.listAllForNotebook(notebookId)
+        : sourcesApi.list(),
     enabled: !!notebookId,
     staleTime: 5 * 1000, // 5 seconds - more responsive for real-time source updates
     refetchOnWindowFocus: true, // Refetch when user comes back to the tab
@@ -26,8 +31,9 @@ export function useSources(notebookId?: string) {
 }
 
 /**
- * Hook for fetching notebook sources with infinite scroll pagination.
- * Returns flattened sources array and pagination controls.
+ * Hook for fetching notebook sources with pagination.
+ * Auto-drains every remaining page so chat context and the sources column
+ * always see the full notebook — not only whatever scrolled into view.
  */
 export function useNotebookSources(notebookId: string) {
   const queryClient = useQueryClient()
@@ -54,11 +60,26 @@ export function useNotebookSources(notebookId: string) {
     refetchOnWindowFocus: true,
   })
 
+  // Drain remaining pages without waiting for the user to scroll. Context
+  // selections are derived from this list; a scroll-gated load forgot sources.
+  useEffect(() => {
+    if (query.hasNextPage && !query.isFetchingNextPage) {
+      void query.fetchNextPage()
+    }
+  }, [query.hasNextPage, query.isFetchingNextPage, query.fetchNextPage])
+
   // Flatten all pages into a single array (memoized to prevent infinite re-renders)
   const sources: SourceListResponse[] = useMemo(
     () => query.data?.pages.flatMap(page => page.sources) ?? [],
     [query.data?.pages]
   )
+
+  // True until every page is in. Chat UI must NOT block on this — only token
+  // counts / send-time context should wait. Blocking the pane on full drain
+  // made large notebooks look hung (same class of pain as podcast generate).
+  const isLoadingFull =
+    query.isLoading ||
+    (!!query.hasNextPage && (query.isFetchingNextPage || query.isFetching))
 
   // Refetch function that resets to first page
   const refetch = useCallback(() => {
@@ -67,9 +88,12 @@ export function useNotebookSources(notebookId: string) {
 
   return {
     sources,
+    /** First page only — safe to show chat / columns. */
     isLoading: query.isLoading,
+    /** Entire inventory (auto-drain still running). */
+    isLoadingFull,
     isFetchingNextPage: query.isFetchingNextPage,
-    hasNextPage: query.hasNextPage,
+    hasNextPage: !!query.hasNextPage,
     fetchNextPage: query.fetchNextPage,
     refetch,
     error: query.error,
@@ -93,7 +117,7 @@ export function useCreateSource() {
 
   return useMutation({
     mutationFn: (data: CreateSourceRequest) => sourcesApi.create(data),
-    onSuccess: (result: SourceResponse, variables) => {
+    onSuccess: (_, variables) => {
       // Invalidate queries for all relevant notebooks with immediate refetch
       if (variables.notebooks) {
         variables.notebooks.forEach(notebookId => {
@@ -123,18 +147,10 @@ export function useCreateSource() {
         refetchType: 'active'
       })
 
-      // Show different messages based on processing mode
-      if (variables.async_processing) {
-        toast({
-          title: t('sources.sourceQueued'),
-          description: t('sources.sourceQueuedDesc'),
-        })
-      } else {
-        toast({
-          title: t('common.success'),
-          description: t('sources.sourceAddedSuccess'),
-        })
-      }
+      toast({
+        title: t('sources.sourceQueued'),
+        description: t('sources.sourceQueuedDesc'),
+      })
     },
     onError: (error: unknown) => {
       toast({

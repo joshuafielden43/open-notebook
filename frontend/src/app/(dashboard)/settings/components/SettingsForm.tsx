@@ -34,9 +34,9 @@ export function SettingsForm() {
   const { data: settings, isLoading, error } = useSettings()
   const { data: capabilities, isError: capabilitiesError } = useCapabilities()
   const updateSettings = useUpdateSettings()
-  // Opt-in heavy runtimes are installed on demand at container startup, so an
-  // engine is only offered when the backend probe confirms it's actually
-  // available. While the probe is still loading, default to available to avoid a
+  // An engine is offered only when the backend confirms it is available in the
+  // immutable image or through a configured remote service. While the probe is
+  // still loading, default to available to avoid a
   // flash of disabled controls on a correctly-configured install; but if the
   // probe *fails*, fail closed (treat as unavailable) rather than advertising an
   // engine the backend couldn't verify.
@@ -147,9 +147,6 @@ export function SettingsForm() {
                   </Select>
               )}
             />
-            {!doclingAvailable && (
-              <p className="text-sm text-muted-foreground">{t('settings.enableDoclingHint')}</p>
-            )}
             <Collapsible open={expandedSections.doc} onOpenChange={() => toggleSection('doc')}>
               <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                 <ChevronDownIcon className={`h-4 w-4 transition-transform ${expandedSections.doc ? 'rotate-180' : ''}`} />
@@ -244,9 +241,6 @@ export function SettingsForm() {
                 </Select>
               )}
             />
-            {!crawl4aiAvailable && (
-              <p className="text-sm text-muted-foreground">{t('settings.enableCrawl4aiHint')}</p>
-            )}
              <Collapsible open={expandedSections.url} onOpenChange={() => toggleSection('url')}>
               <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                 <ChevronDownIcon className={`h-4 w-4 transition-transform ${expandedSections.url ? 'rotate-180' : ''}`} />

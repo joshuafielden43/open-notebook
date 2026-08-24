@@ -12,6 +12,9 @@ import {
 
 export type SourceSortField = 'type' | 'title' | 'created' | 'updated' | 'insights_count' | 'embedded'
 
+/** API max for GET /sources limit (see api/routers/sources.py). */
+export const SOURCES_PAGE_MAX = 100
+
 export const sourcesApi = {
   list: async (params?: {
     notebook_id?: string
@@ -22,6 +25,30 @@ export const sourcesApi = {
   }) => {
     const response = await apiClient.get<SourceListResponse[]>('/sources', { params })
     return response.data
+  },
+
+  /**
+   * Every source in a notebook. Pages at the API ceiling until a short page
+   * — never stop at the default first-page 50.
+   */
+  listAllForNotebook: async (notebookId: string): Promise<SourceListResponse[]> => {
+    const all: SourceListResponse[] = []
+    let offset = 0
+    for (;;) {
+      const page = await sourcesApi.list({
+        notebook_id: notebookId,
+        limit: SOURCES_PAGE_MAX,
+        offset,
+        sort_by: 'updated',
+        sort_order: 'desc',
+      })
+      all.push(...page)
+      if (page.length < SOURCES_PAGE_MAX) {
+        break
+      }
+      offset += page.length
+    }
+    return all
   },
 
   get: async (id: string) => {
@@ -62,7 +89,6 @@ export const sourcesApi = {
     
     formData.append('embed', String(data.embed ?? false))
     formData.append('delete_source', String(data.delete_source ?? false))
-    formData.append('async_processing', String(data.async_processing ?? false))
     
     const response = await apiClient.post<SourceResponse>('/sources', formData)
     return response.data
@@ -87,7 +113,6 @@ export const sourcesApi = {
     formData.append('file', file)
     formData.append('notebook_id', notebook_id)
     formData.append('type', 'upload')
-    formData.append('async_processing', 'true')
     
     const response = await apiClient.post<SourceResponse>('/sources', formData, {
       headers: {

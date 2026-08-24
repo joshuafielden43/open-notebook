@@ -10,8 +10,13 @@ vi.mock('react-i18next', () => ({
   useTranslation: vi.fn()
 }))
 
+vi.mock('@/lib/i18n', () => ({
+  ensureLocaleLoaded: vi.fn().mockResolvedValue(undefined),
+  default: {},
+}))
+
 describe('useTranslation Hook', () => {
-  const changeLanguageMock = vi.fn()
+  const changeLanguageMock = vi.fn().mockResolvedValue('zh-CN')
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -33,11 +38,11 @@ describe('useTranslation Hook', () => {
     expect(result.current.t('common.appName')).toBe('Open Notebook')
   })
 
-  it('should allow changing language via setLanguage', () => {
+  it('should allow changing language via setLanguage', async () => {
     const { result } = renderHook(() => useTranslation())
 
-    act(() => {
-      result.current.setLanguage('zh-CN')
+    await act(async () => {
+      await result.current.setLanguage('zh-CN')
     })
 
     expect(changeLanguageMock).toHaveBeenCalledWith('zh-CN')

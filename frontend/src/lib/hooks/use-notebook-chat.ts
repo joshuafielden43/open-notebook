@@ -21,9 +21,21 @@ interface UseNotebookChatParams {
   sources: SourceListResponse[]
   notes: NoteResponse[]
   contextSelections: ContextSelections
+  /**
+   * False while the notebook source inventory is still paging in.
+   * Token-count rebuilds wait so we don't fire multi-second buildContext
+   * once per page (274 sources × N pages = pegged CPU / hung chat).
+   */
+  sourcesInventoryComplete?: boolean
 }
 
-export function useNotebookChat({ notebookId, sources, notes, contextSelections }: UseNotebookChatParams) {
+export function useNotebookChat({
+  notebookId,
+  sources,
+  notes,
+  contextSelections,
+  sourcesInventoryComplete = true,
+}: UseNotebookChatParams) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
@@ -213,6 +225,11 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     setIsSending(true)
 
     try {
+      if (!sourcesInventoryComplete) {
+        toast.error(t('chat.contextStillLoading'))
+        setMessages(prev => prev.filter(msg => !msg.id.startsWith('temp-')))
+        return
+      }
       // Build context and send message
       const context = await buildContext()
       const response = await chatApi.sendMessage({
@@ -241,6 +258,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     currentSessionId,
     currentSession,
     pendingModelOverride,
+    sourcesInventoryComplete,
     buildContext,
     refetchCurrentSession,
     queryClient,
@@ -287,17 +305,28 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     }
   }, [currentSessionId, updateSessionMutation])
 
-  // Update token/char counts when context selections change
+  // Update token/char counts when context selections change — only after the
+  // full inventory is in, and debounced so bulk selection churn doesn't
+  // stack concurrent full assemblies.
   useEffect(() => {
-    const updateContextCounts = async () => {
+    if (!sourcesInventoryComplete) {
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(async () => {
       try {
         await buildContext()
       } catch (error) {
-        console.error('Error updating context counts:', error)
+        if (!cancelled) {
+          console.error('Error updating context counts:', error)
+        }
       }
+    }, 400)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
     }
-    updateContextCounts()
-  }, [buildContext])
+  }, [buildContext, sourcesInventoryComplete])
 
   return {
     // State

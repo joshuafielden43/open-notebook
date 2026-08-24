@@ -1,6 +1,6 @@
 import axios, { AxiosResponse } from 'axios'
 import { getApiUrl } from '@/lib/config'
-import { getAuthToken } from '@/lib/auth-token'
+import { clearAuthStorage, getAuthToken } from '@/lib/auth-token'
 
 // API client with runtime-configurable base URL
 // The base URL is fetched from the API config endpoint on first request
@@ -31,6 +31,11 @@ export const apiClient = axios.create({
   withCredentials: false,
 })
 
+// Deliberately excludes auth. Native media elements cannot attach bearer
+// headers, so callers use this only to verify that a media route is publicly
+// reachable within the deployment's network boundary.
+export const anonymousApiClient = axios.create({ timeout: apiTimeout })
+
 // Request interceptor to add base URL and auth header
 apiClient.interceptors.request.use(async (config) => {
   // Set the base URL dynamically from runtime config
@@ -60,9 +65,9 @@ apiClient.interceptors.response.use(
   (response: AxiosResponse) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Clear auth and redirect to login
+      // Clear auth (sessionStorage + legacy localStorage) and hard-redirect
       if (typeof window !== 'undefined') {
-        localStorage.removeItem('auth-storage')
+        clearAuthStorage()
         window.location.href = '/login'
       }
     }

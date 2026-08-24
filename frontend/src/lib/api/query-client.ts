@@ -21,8 +21,12 @@ export const QUERY_KEYS = {
   notebooks: ['notebooks'] as const,
   notebook: (id: string) => ['notebooks', id] as const,
   notes: (notebookId?: string) => ['notes', notebookId] as const,
+  /** Full notebook note list (paged client-side); not the first-page cache. */
+  notesAll: (notebookId: string) => ['notes', 'all', notebookId] as const,
   note: (id: string) => ['notes', id] as const,
   sources: (notebookId?: string) => ['sources', notebookId] as const,
+  /** Full notebook source list (paged client-side); not the first-page cache. */
+  sourcesAll: (notebookId: string) => ['sources', 'all', notebookId] as const,
   sourcesInfinite: (notebookId: string) => ['sources', 'infinite', notebookId] as const,
   source: (id: string) => ['sources', id] as const,
   settings: ['settings'] as const,

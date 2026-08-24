@@ -1,5 +1,6 @@
 'use client'
 
+import { BackgroundJobsIndicator } from '@/components/common/BackgroundJobsIndicator'
 import { AppSidebar } from './AppSidebar'
 import { SetupBanner } from './SetupBanner'
 
@@ -13,6 +14,7 @@ export function AppShell({ children }: AppShellProps) {
       <AppSidebar />
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
         <SetupBanner />
+        <BackgroundJobsIndicator />
         {children}
       </main>
     </div>

@@ -1,43 +1,28 @@
-import { zhCN } from './zh-CN';
-import { enUS } from './en-US';
-import { zhTW } from './zh-TW';
-import { ptBR } from './pt-BR';
-import { jaJP } from './ja-JP';
-import { itIT } from './it-IT';
-import { frFR } from './fr-FR';
-import { ruRU } from './ru-RU';
-import { bnIN } from './bn-IN';
-import { caES } from './ca-ES';
-import { esES } from './es-ES';
-import { deDE } from './de-DE';
-import { plPL } from './pl-PL';
-import { trTR } from './tr-TR';
+import { enUS } from './en-US'
+import type { TranslationShape } from './en-US'
 
-export const resources = {
-  'zh-CN': { translation: zhCN },
-  'en-US': { translation: enUS },
-  'zh-TW': { translation: zhTW },
-  'pt-BR': { translation: ptBR },
-  'ja-JP': { translation: jaJP },
-  'it-IT': { translation: itIT },
-  'fr-FR': { translation: frFR },
-  'ru-RU': { translation: ruRU },
-  'bn-IN': { translation: bnIN },
-  'ca-ES': { translation: caES },
-  'es-ES': { translation: esES },
-  'de-DE': { translation: deDE },
-  'pl-PL': { translation: plPL },
-  'tr-TR': { translation: trTR },
-} as const;
+export type TranslationKeys = TranslationShape
 
-export type TranslationKeys = typeof enUS;
-
-export type LanguageCode = keyof typeof resources;
+export type LanguageCode =
+  | 'en-US'
+  | 'tr-TR'
+  | 'ca-ES'
+  | 'zh-CN'
+  | 'zh-TW'
+  | 'pt-BR'
+  | 'ja-JP'
+  | 'it-IT'
+  | 'fr-FR'
+  | 'ru-RU'
+  | 'bn-IN'
+  | 'es-ES'
+  | 'de-DE'
+  | 'pl-PL'
 
 export type Language = {
-  code: LanguageCode;
-  label: string;
-};
+  code: LanguageCode
+  label: string
+}
 
 export const languages: Language[] = [
   { code: 'en-US', label: 'English' },
@@ -54,6 +39,51 @@ export const languages: Language[] = [
   { code: 'es-ES', label: 'Español' },
   { code: 'de-DE', label: 'Deutsch' },
   { code: 'pl-PL', label: 'Polski' },
-];
+]
 
-export { zhCN, enUS, zhTW, ptBR, jaJP, itIT, frFR, ruRU, bnIN, caES, esES, deDE, plPL, trTR };
+/** Only en-US is bundled in the main chunk; other locales load on demand. */
+export const resources = {
+  'en-US': { translation: enUS },
+} as const
+
+const localeLoaders: Record<
+  Exclude<LanguageCode, 'en-US'>,
+  () => Promise<TranslationKeys>
+> = {
+  'tr-TR': () => import('./tr-TR').then((m) => m.trTR),
+  'ca-ES': () => import('./ca-ES').then((m) => m.caES),
+  'zh-CN': () => import('./zh-CN').then((m) => m.zhCN),
+  'zh-TW': () => import('./zh-TW').then((m) => m.zhTW),
+  'pt-BR': () => import('./pt-BR').then((m) => m.ptBR),
+  'ja-JP': () => import('./ja-JP').then((m) => m.jaJP),
+  'it-IT': () => import('./it-IT').then((m) => m.itIT),
+  'fr-FR': () => import('./fr-FR').then((m) => m.frFR),
+  'ru-RU': () => import('./ru-RU').then((m) => m.ruRU),
+  'bn-IN': () => import('./bn-IN').then((m) => m.bnIN),
+  'es-ES': () => import('./es-ES').then((m) => m.esES),
+  'de-DE': () => import('./de-DE').then((m) => m.deDE),
+  'pl-PL': () => import('./pl-PL').then((m) => m.plPL),
+}
+
+export function isLanguageCode(code: string): code is LanguageCode {
+  return code === 'en-US' || code in localeLoaders
+}
+
+export async function importLocale(code: LanguageCode): Promise<TranslationKeys> {
+  if (code === 'en-US') {
+    return enUS
+  }
+  return localeLoaders[code]()
+}
+
+/** Load every supported locale (parity tests and offline tooling). */
+export async function importAllLocales(): Promise<
+  Record<LanguageCode, TranslationKeys>
+> {
+  const entries = await Promise.all(
+    languages.map(async ({ code }) => [code, await importLocale(code)] as const),
+  )
+  return Object.fromEntries(entries) as Record<LanguageCode, TranslationKeys>
+}
+
+export { enUS }

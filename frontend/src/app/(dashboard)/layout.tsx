@@ -9,6 +9,7 @@ import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { ModalProvider } from '@/components/providers/ModalProvider'
 import { CreateDialogsProvider } from '@/lib/hooks/use-create-dialogs'
 import { CommandPalette } from '@/components/common/CommandPalette'
+import { WorkerStatusBanner } from '@/components/common/WorkerStatusBanner'
 
 export default function DashboardLayout({
   children,
@@ -54,6 +55,7 @@ export default function DashboardLayout({
   return (
     <ErrorBoundary>
       <CreateDialogsProvider>
+        <WorkerStatusBanner />
         {children}
         <ModalProvider />
         <CommandPalette />

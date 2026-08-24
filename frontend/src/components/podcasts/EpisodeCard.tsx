@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { getDateLocale } from '@/lib/utils/date-locale'
-import { InfoIcon, RefreshCcw, Trash2 } from 'lucide-react'
+import { Download, InfoIcon, Play, RefreshCcw, Trash2 } from 'lucide-react'
 
 import apiClient from '@/lib/api/client'
 import { resolvePodcastAssetUrl } from '@/lib/api/podcasts'
@@ -34,6 +34,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { anonymousApiClient } from '@/lib/api/client'
 import type { TFunction } from 'i18next'
 
 interface EpisodeCardProps {
@@ -82,7 +83,27 @@ const getSTATUS_META = (t: TFunction): Record<
   },
 })
 
-function StatusBadge({ status }: { status?: EpisodeStatus | null }) {
+function stageLabel(t: TFunction, stage?: string | null): string | null {
+  if (!stage) return null
+  const map: Record<string, string> = {
+    queued: t('podcasts.stageQueued'),
+    outline: t('podcasts.stageOutline'),
+    transcript: t('podcasts.stageTranscript'),
+    tts: t('podcasts.stageTts'),
+    combine: t('podcasts.stageCombine'),
+    completed: t('podcasts.stageCompleted'),
+    failed: t('podcasts.stageFailed'),
+  }
+  return map[stage] ?? stage
+}
+
+function StatusBadge({
+  status,
+  stage,
+}: {
+  status?: EpisodeStatus | null
+  stage?: string | null
+}) {
   const { t } = useTranslation()
   // Don't show badge for completed episodes
   if (status === 'completed') {
@@ -90,12 +111,15 @@ function StatusBadge({ status }: { status?: EpisodeStatus | null }) {
   }
 
   const meta = getSTATUS_META(t)[status ?? 'unknown']
+  const stageText = stageLabel(t, stage)
   return (
     <Badge
       variant="outline"
       className={cn('uppercase tracking-wide text-xs', meta.className)}
     >
-      {meta.label}
+      {stageText && status !== 'failed' && status !== 'error'
+        ? stageText
+        : meta.label}
     </Badge>
   )
 }
@@ -157,49 +181,119 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
   const { t, language } = useTranslation()
   const [audioSrc, setAudioSrc] = useState<string | undefined>()
   const [audioError, setAudioError] = useState<string | null>(null)
+  const [audioLoading, setAudioLoading] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const revokeUrlRef = useRef<string | undefined>(undefined)
 
   const outlineSegments = useMemo(() => extractOutlineSegments(episode.outline), [episode.outline])
   const transcriptEntries = useMemo(() => extractTranscriptEntries(episode.transcript), [episode.transcript])
 
+  const hasAudio = Boolean(episode.audio_url ?? episode.audio_file)
+
   useEffect(() => {
-    let revokeUrl: string | undefined
+    return () => {
+      if (revokeUrlRef.current) {
+        URL.revokeObjectURL(revokeUrlRef.current)
+      }
+    }
+  }, [])
+
+  // With OPEN_NOTEBOOK_PUBLIC_AUDIO the audio route answers without auth and
+  // the media element streams natively (Range seeking, buffer-ahead). A HEAD
+  // probe detects that; otherwise fall back to the authed blob fetch.
+  const resolveAudioAccess = useCallback(async (): Promise<
+    { url: string; publicRoute: boolean } | null
+  > => {
+    const directAudioUrl = await resolvePodcastAssetUrl(episode.audio_url ?? episode.audio_file)
+    if (!directAudioUrl) {
+      return null
+    }
+    if (!episode.audio_url) {
+      return { url: directAudioUrl, publicRoute: true }
+    }
+    try {
+      const probe = await anonymousApiClient.head(directAudioUrl)
+      if (probe.status >= 200 && probe.status < 300) {
+        return { url: directAudioUrl, publicRoute: true }
+      }
+    } catch {
+      // Probe failure means the route needs auth; use the blob path.
+    }
+    return { url: directAudioUrl, publicRoute: false }
+  }, [episode.audio_url, episode.audio_file])
+
+  // Episodes can be hundreds of MB; nothing downloads on mount — only when
+  // the listener asks for it.
+  const loadAudio = useCallback(async () => {
     setAudioError(null)
-
-    // If backend exposed a protected endpoint, fetch it with auth headers
-    const loadProtectedAudio = async () => {
-      // First resolve the audio URL
-      const directAudioUrl = await resolvePodcastAssetUrl(episode.audio_url ?? episode.audio_file)
-
-      if (!directAudioUrl || !episode.audio_url) {
-        setAudioSrc(directAudioUrl)
+    setAudioLoading(true)
+    try {
+      const access = await resolveAudioAccess()
+      if (!access) {
+        setAudioSrc(undefined)
         return
       }
 
-      try {
-        // apiClient attaches the auth header; directAudioUrl is absolute so
-        // the dynamic baseURL is ignored.
-        const response = await apiClient.get<Blob>(directAudioUrl, {
-          responseType: 'blob',
-        })
-
-        revokeUrl = URL.createObjectURL(response.data)
-        setAudioSrc(revokeUrl)
-      } catch (error) {
-        console.error('Unable to load podcast audio', error)
-        setAudioError(t('podcasts.audioUnavailable'))
-        setAudioSrc(undefined)
+      if (access.publicRoute) {
+        setAudioSrc(access.url)
+        return
       }
+
+      // apiClient attaches the auth header; the URL is absolute so the
+      // dynamic baseURL is ignored.
+      const response = await apiClient.get<Blob>(access.url, {
+        responseType: 'blob',
+      })
+
+      revokeUrlRef.current = URL.createObjectURL(response.data)
+      setAudioSrc(revokeUrlRef.current)
+    } catch (error) {
+      console.error('Unable to load podcast audio', error)
+      setAudioError(t('podcasts.audioUnavailable'))
+      setAudioSrc(undefined)
+    } finally {
+      setAudioLoading(false)
     }
+  }, [resolveAudioAccess, t])
 
-    void loadProtectedAudio()
+  const [downloading, setDownloading] = useState(false)
 
-    return () => {
-      if (revokeUrl) {
-        URL.revokeObjectURL(revokeUrl)
+  const handleDownload = useCallback(async () => {
+    setDownloading(true)
+    try {
+      const access = await resolveAudioAccess()
+      if (!access) {
+        return
       }
+      const sep = access.url.includes('?') ? '&' : '?'
+      if (access.publicRoute) {
+        // Server sets Content-Disposition: attachment with a human filename.
+        const anchor = document.createElement('a')
+        anchor.href = `${access.url}${sep}download=1`
+        anchor.download = ''
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        return
+      }
+      const response = await apiClient.get<Blob>(`${access.url}${sep}download=1`, {
+        responseType: 'blob',
+      })
+      const objectUrl = URL.createObjectURL(response.data)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = `${(episode.name || 'episode').replace(/[^\w\s.-]/g, '').trim() || 'episode'}.mp3`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(objectUrl)
+    } catch (error) {
+      console.error('Unable to download podcast audio', error)
+      setAudioError(t('podcasts.audioUnavailable'))
+    } finally {
+      setDownloading(false)
     }
-  }, [episode.audio_url, episode.audio_file, t])
+  }, [resolveAudioAccess, episode.name, t])
 
   const distance = episode.created
     ? formatDistanceToNow(new Date(episode.created), {
@@ -233,14 +327,35 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
               <h3 className="text-base font-semibold text-foreground">
                 {episode.name}
               </h3>
-              <StatusBadge status={episode.job_status} />
+              <StatusBadge
+                status={episode.job_status}
+                stage={episode.generation_stage}
+              />
             </div>
             <p className="text-xs text-muted-foreground">
               {t('podcasts.profile')}: {episode.episode_profile?.name || t('common.unknown')}
               {createdLabel ? ` • ${createdLabel}` : ''}
+              {episode.generation_stage &&
+              episode.job_status !== 'completed' &&
+              episode.job_status !== 'failed' &&
+              episode.job_status !== 'error'
+                ? ` • ${stageLabel(t, episode.generation_stage)}`
+                : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {hasAudio && !isFailed ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleDownload()}
+                disabled={downloading}
+                aria-label={t('common.download')}
+                title={t('common.download')}
+              >
+                <Download className={cn('h-4 w-4', downloading && 'animate-pulse')} />
+              </Button>
+            ) : null}
             <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm">
@@ -256,14 +371,7 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 overflow-hidden">
-                  {audioSrc ? (
-                    <div className="rounded-md border bg-card p-2">
-                      <audio controls preload="none" src={audioSrc} className="w-full" />
-                    </div>
-                  ) : audioError ? (
-                    <p className="text-sm text-destructive">{audioError}</p>
-                  ) : null}
-
+                  {/* Playback lives only on the card — see ADR-012. */}
                   <Tabs defaultValue="summary" className="h-[60vh] flex flex-col">
                     <TabsList className="grid w-full grid-cols-3">
                       <TabsTrigger value="summary">{t('podcasts.summaryTab')}</TabsTrigger>
@@ -431,11 +539,25 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
         </div>
 
         {audioSrc ? (
-          <div className="rounded-md border bg-card p-2">
-            <audio controls preload="none" src={audioSrc} className="w-full" />
+          /* Inline card player on md+; on phone widths it docks to the bottom
+             edge as a Spotify-style mini-player (overlay, so it owns a shadow). */
+          <div className="rounded-md border bg-card p-2 max-md:fixed max-md:inset-x-2 max-md:bottom-2 max-md:z-50 max-md:rounded-lg max-md:bg-card/95 max-md:p-3 max-md:pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-md:shadow-lg max-md:backdrop-blur">
+            <p className="mb-1.5 truncate text-xs font-medium md:hidden">{episode.name}</p>
+            <audio controls autoPlay preload="none" src={audioSrc} className="w-full" />
           </div>
         ) : audioError ? (
           <p className="text-sm text-destructive">{audioError}</p>
+        ) : hasAudio && !isFailed ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void loadAudio()}
+            disabled={audioLoading}
+            className="w-fit"
+          >
+            <Play className="mr-1.5 h-3.5 w-3.5" />
+            {audioLoading ? t('podcasts.loadingAudio') : t('podcasts.loadAudio')}
+          </Button>
         ) : null}
 
         {isFailed && episode.error_message ? (

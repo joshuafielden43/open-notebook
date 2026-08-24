@@ -41,14 +41,29 @@ describe('ChatColumn', () => {
     sources: [],
   }
 
-  it('shows loading spinner when fetching data', () => {
+  it('shows loading spinner only on first sources page (empty)', () => {
     vi.mocked(useNotes).mockReturnValue(createNotesMock({ isLoading: true }))
     vi.mocked(useNotebookChat).mockReturnValue(createChatMock())
 
-    render(<ChatColumn {...baseProps} sourcesLoading={true} />)
+    render(<ChatColumn {...baseProps} sourcesLoading={true} sources={[]} />)
 
-    // Should show loading spinner
     expect(screen.getByTestId('loading-spinner')).toBeInTheDocument()
+  })
+
+  it('renders chat panel while full inventory is still draining', () => {
+    vi.mocked(useNotes).mockReturnValue(createNotesMock({ isLoading: false }))
+    vi.mocked(useNotebookChat).mockReturnValue(createChatMock())
+
+    render(
+      <ChatColumn
+        {...baseProps}
+        sourcesLoading={false}
+        sourcesLoadingFull={true}
+        sources={[{ id: 'source:1' } as never]}
+      />
+    )
+
+    expect(screen.getByTestId('chat-panel')).toBeInTheDocument()
   })
 
   it('renders chat panel when data is loaded', () => {
@@ -57,7 +72,6 @@ describe('ChatColumn', () => {
 
     render(<ChatColumn {...baseProps} sourcesLoading={false} />)
 
-    // Should show chat panel
     expect(screen.getByTestId('chat-panel')).toBeInTheDocument()
   })
 })

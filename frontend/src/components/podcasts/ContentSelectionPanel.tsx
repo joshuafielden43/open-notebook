@@ -131,12 +131,12 @@ export function ContentSelectionPanel({
                         onCheckedChange={(checked) => {
                           onNotebookToggle(notebook.id, checked)
                           queryClient.prefetchQuery({
-                            queryKey: QUERY_KEYS.sources(notebook.id),
-                            queryFn: () => sourcesApi.list({ notebook_id: notebook.id }),
+                            queryKey: QUERY_KEYS.sourcesAll(notebook.id),
+                            queryFn: () => sourcesApi.listAllForNotebook(notebook.id),
                           })
                           queryClient.prefetchQuery({
-                            queryKey: QUERY_KEYS.notes(notebook.id),
-                            queryFn: () => notesApi.list({ notebook_id: notebook.id }),
+                            queryKey: QUERY_KEYS.notesAll(notebook.id),
+                            queryFn: () => notesApi.listAllForNotebook(notebook.id),
                           })
                         }}
                         onClick={(event) => event.stopPropagation()}

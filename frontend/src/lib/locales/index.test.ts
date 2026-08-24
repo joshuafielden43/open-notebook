@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import fs from 'fs'
 import path from 'path'
-import { resources } from './index'
 import { enUS } from './en-US'
+import {
+  importAllLocales,
+  languages,
+  type LanguageCode,
+  type TranslationKeys,
+} from './index'
 
 const getKeys = (obj: Record<string, unknown>, prefix = ''): string[] => {
   return Object.keys(obj).reduce((res: string[], el) => {
@@ -49,13 +54,16 @@ const straySingleBraceTokens = (value: string): string[] => {
 
 describe('Locale Parity', () => {
   const enKeys = getKeys(enUS)
+  let allLocales: Record<LanguageCode, TranslationKeys>
 
-  const locales = Object.entries(resources).filter(([code]) => code !== 'en-US')
+  beforeAll(async () => {
+    allLocales = await importAllLocales()
+  }, 60_000)
 
-  it.each(locales.map(([code, resource]) => [code, resource] as const))(
+  it.each(languages.filter((l) => l.code !== 'en-US').map((l) => l.code))(
     '%s should have the same keys as en-US',
-    (code, resource) => {
-      const localeKeys = getKeys(resource.translation as Record<string, unknown>)
+    (code) => {
+      const localeKeys = getKeys(allLocales[code] as unknown as Record<string, unknown>)
 
       const missing = enKeys.filter(key => !localeKeys.includes(key))
       const extra = localeKeys.filter(key => !enKeys.includes(key))
@@ -68,14 +76,17 @@ describe('Locale Parity', () => {
 
 describe('Placeholder Parity', () => {
   const enLeaves = getLeafStrings(enUS)
+  let allLocales: Record<LanguageCode, TranslationKeys>
 
-  const locales = Object.entries(resources).filter(([code]) => code !== 'en-US')
+  beforeAll(async () => {
+    allLocales = await importAllLocales()
+  }, 60_000)
 
-  it.each(locales.map(([code, resource]) => [code, resource] as const))(
+  it.each(languages.filter((l) => l.code !== 'en-US').map((l) => l.code))(
     '%s interpolation placeholders should match en-US',
-    (code, resource) => {
+    (code) => {
       const localeLeaves = getLeafStrings(
-        resource.translation as Record<string, unknown>,
+        allLocales[code] as unknown as Record<string, unknown>,
       )
 
       const mismatches: string[] = []

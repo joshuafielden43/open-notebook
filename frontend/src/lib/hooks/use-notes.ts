@@ -9,7 +9,11 @@ import { CreateNoteRequest, UpdateNoteRequest } from '@/lib/types/api'
 export function useNotes(notebookId?: string) {
   return useQuery({
     queryKey: QUERY_KEYS.notes(notebookId),
-    queryFn: () => notesApi.list({ notebook_id: notebookId }),
+    // Full notebook inventory — default list limit would truncate large sets.
+    queryFn: () =>
+      notebookId
+        ? notesApi.listAllForNotebook(notebookId)
+        : notesApi.list(),
     enabled: !!notebookId,
   })
 }

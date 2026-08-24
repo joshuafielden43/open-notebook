@@ -5,16 +5,14 @@ export const CAPABILITIES_QUERY_KEYS = {
   capabilities: ['capabilities'] as const,
 }
 
-/**
- * Hook reporting which opt-in extraction runtimes (Docling, Crawl4AI local) are
- * available. These only change when the container is restarted with different
- * OPEN_NOTEBOOK_ENABLE_* flags, so cache aggressively like the providers list.
- */
+/** Poll extraction and worker capabilities so failures surface app-wide. */
 export function useCapabilities() {
   return useQuery({
     queryKey: CAPABILITIES_QUERY_KEYS.capabilities,
     queryFn: () => capabilitiesApi.get(),
-    staleTime: Infinity,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
     gcTime: 24 * 60 * 60 * 1000,
   })
 }

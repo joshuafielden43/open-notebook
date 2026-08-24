@@ -3,9 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { podcastsApi, EpisodeProfileInput, SpeakerProfileInput } from '@/lib/api/podcasts'
 import { QUERY_KEYS } from '@/lib/api/query-client'
+import { BACKGROUND_JOBS_QUERY_KEY } from '@/lib/hooks/use-background-jobs'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { getApiErrorKey } from '@/lib/utils/error-handler'
+import { getApiErrorKey, getApiErrorMessage } from '@/lib/utils/error-handler'
 import {
   ACTIVE_EPISODE_STATUSES,
   EpisodeProfile,
@@ -39,12 +40,23 @@ function hasActiveEpisodes(episodes: PodcastEpisode[]) {
   })
 }
 
-export function usePodcastEpisodes(options?: { autoRefresh?: boolean }) {
-  const { autoRefresh = true } = options ?? {}
+export function usePodcastEpisodes(options?: {
+  autoRefresh?: boolean
+  /** When set, only episodes scoped to this notebook are returned. */
+  notebookId?: string
+}) {
+  const { autoRefresh = true, notebookId } = options ?? {}
 
   const query = useQuery({
-    queryKey: QUERY_KEYS.podcastEpisodes,
-    queryFn: podcastsApi.listEpisodes,
+    // Include notebook scope in the key so global vs filtered lists don't share cache.
+    // Bare queryFn: podcastsApi.listEpisodes is wrong: React Query passes its context
+    // object as the first arg, which became notebook_id=[object Object] after listEpisodes
+    // gained an optional notebookId param.
+    queryKey: [...QUERY_KEYS.podcastEpisodes, notebookId ?? 'all'],
+    queryFn: () => podcastsApi.listEpisodes(notebookId),
+    // POLS (#1624): keep prior episodes visible while a scope switch refetches.
+    // Loading affordances are for first acquisition only — never blank the list.
+    placeholderData: (previousData) => previousData,
     refetchInterval: (current) => {
       if (!autoRefresh) {
         return false
@@ -397,8 +409,18 @@ export function useGeneratePodcast() {
     mutationFn: (payload: PodcastGenerationRequest) =>
       podcastsApi.generatePodcast(payload),
     onSuccess: async (response) => {
-      // Immediately refetch to show the new episode
+      // Immediately refetch to show the new episode + ambient job chip
       await queryClient.refetchQueries({ queryKey: QUERY_KEYS.podcastEpisodes })
+      await queryClient.invalidateQueries({ queryKey: BACKGROUND_JOBS_QUERY_KEY })
+      if (response.worker_likely_ready === false) {
+        toast({
+          title: t('podcasts.generationQueuedWorkerDown'),
+          description:
+            response.message || t('podcasts.generationQueuedWorkerDownDesc'),
+          variant: 'destructive',
+        })
+        return
+      }
       toast({
         title: t('podcasts.generationStarted'),
         description: t('podcasts.generationStartedDesc', { name: response.episode_name }),
@@ -407,7 +429,7 @@ export function useGeneratePodcast() {
     onError: (error: unknown) => {
       toast({
         title: t('podcasts.failedToStartGeneration'),
-        description: getApiErrorKey(error, t('podcasts.tryAgainMoment')),
+        description: getApiErrorMessage(error, t, 'podcasts.tryAgainMoment'),
         variant: 'destructive',
       })
     },

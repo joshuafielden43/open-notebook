@@ -19,7 +19,7 @@ export function useAuth() {
   } = useAuthStore()
 
   useEffect(() => {
-    // Only check auth after the store has hydrated from localStorage
+    // Only check auth after the store has hydrated from sessionStorage
     if (hasHydrated) {
       // First check if auth is required
       if (authRequired === null) {

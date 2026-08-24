@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import apiClient from '@/lib/api/client'
 import { getApiUrl } from '@/lib/config'
 
@@ -19,6 +19,26 @@ interface AuthState {
   logout: () => void
   checkAuth: () => Promise<boolean>
 }
+
+// sessionStorage: password is not written to disk across browser restarts.
+// XSS can still read the live tab; pair with HTTPS + rate-limited auth.
+const authSessionStorage = createJSONStorage(() => {
+  if (typeof window === 'undefined') {
+    // SSR: no-op storage
+    return {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    }
+  }
+  try {
+    // Drop any legacy localStorage copy from older builds on first access.
+    window.localStorage.removeItem('auth-storage')
+  } catch {
+    // ignore
+  }
+  return window.sessionStorage
+})
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -210,13 +230,14 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage',
+      storage: authSessionStorage,
       partialize: (state) => ({
         token: state.token,
-        isAuthenticated: state.isAuthenticated
+        isAuthenticated: state.isAuthenticated,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true)
-      }
+      },
     }
   )
 )

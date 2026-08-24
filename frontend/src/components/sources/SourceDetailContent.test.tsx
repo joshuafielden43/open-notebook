@@ -9,6 +9,7 @@ import { SourceDetailResponse } from '@/lib/types/api'
 // useTranslation is mocked globally in setup.ts (t returns the key string)
 
 vi.mock('@/lib/api/sources', () => ({
+  SOURCES_PAGE_MAX: 100,
   sourcesApi: {
     get: vi.fn(),
   },

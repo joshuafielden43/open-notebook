@@ -264,10 +264,26 @@ function SourceCardImpl({
               </h4>
             </div>
 
-            {/* Processing message for active statuses */}
+            {/* Processing message / failure reason */}
             {statusData?.message && (isProcessing || isFailed) && (
-              <p className="text-xs text-muted-foreground mb-2 italic">
+              <p
+                className={cn(
+                  'text-xs mb-2 whitespace-pre-wrap break-words',
+                  isFailed
+                    ? 'text-destructive not-italic'
+                    : 'text-muted-foreground italic'
+                )}
+                title={statusData.message}
+              >
                 {statusData.message}
+              </p>
+            )}
+            {isFailed &&
+              !statusData?.message &&
+              typeof statusData?.processing_info?.error === 'string' &&
+              statusData.processing_info.error && (
+              <p className="text-xs mb-2 whitespace-pre-wrap break-words text-destructive">
+                {statusData.processing_info.error as string}
               </p>
             )}
 

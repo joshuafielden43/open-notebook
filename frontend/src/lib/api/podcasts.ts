@@ -31,8 +31,16 @@ export async function resolvePodcastAssetUrl(path?: string | null): Promise<stri
 }
 
 export const podcastsApi = {
-  listEpisodes: async () => {
-    const response = await apiClient.get<PodcastEpisode[]>('/podcasts/episodes')
+  listEpisodes: async (notebookId?: string) => {
+    // detail=full so outline/transcript appear as they're persisted mid-run.
+    // Polling only fires while episodes are active (see usePodcastEpisodes).
+    const params = new URLSearchParams({ detail: 'full' })
+    if (notebookId) {
+      params.set('notebook_id', notebookId)
+    }
+    const response = await apiClient.get<PodcastEpisode[]>(
+      `/podcasts/episodes?${params.toString()}`
+    )
     return response.data
   },
 

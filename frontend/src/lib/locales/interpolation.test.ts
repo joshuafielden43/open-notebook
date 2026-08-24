@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { createInstance } from 'i18next'
-import { resources } from './index'
+import { enUS } from './en-US'
+import { importLocale } from './index'
 
 // Mirrors the interpolation config in src/lib/i18n.ts
 const i18n = createInstance()
 
 beforeAll(async () => {
+  const ptBR = await importLocale('pt-BR')
   await i18n.init({
-    resources,
+    resources: {
+      'en-US': { translation: enUS },
+      'pt-BR': { translation: ptBR },
+    },
     lng: 'en-US',
     fallbackLng: 'en-US',
     interpolation: {

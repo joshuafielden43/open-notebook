@@ -1,6 +1,7 @@
 import { useTranslation as useI18nTranslation } from 'react-i18next'
 import { useMemo, useCallback } from 'react'
 import { emitLanguageChangeEnd, emitLanguageChangeStart } from '@/lib/i18n-events'
+import { ensureLocaleLoaded } from '@/lib/i18n'
 
 /**
  * Thin wrapper around react-i18next's useTranslation hook.
@@ -17,6 +18,7 @@ export function useTranslation() {
     emitLanguageChangeStart(lang)
 
     try {
+      await ensureLocaleLoaded(lang)
       await i18n.changeLanguage(lang)
       return i18n.language
     } finally {

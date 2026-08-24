@@ -51,7 +51,7 @@ describe('SettingsForm engine gating', () => {
     vi.clearAllMocks()
   })
 
-  it('disables OCR and shows env hints when the runtimes are unavailable', () => {
+  it('disables OCR when the runtime is unavailable', () => {
     mockCapabilities({
       docling_available: false,
       crawl4ai_available: false,
@@ -59,15 +59,13 @@ describe('SettingsForm engine gating', () => {
     })
     render(<SettingsForm />)
 
-    expect(screen.getByText('settings.enableDoclingHint')).toBeInTheDocument()
-    expect(screen.getByText('settings.enableCrawl4aiHint')).toBeInTheDocument()
     // Target the OCR toggle by its accessible name (from the associated Label).
     expect(
       screen.getByRole('checkbox', { name: 'settings.ocrEnabled' })
     ).toBeDisabled()
   })
 
-  it('enables OCR and hides the hints when the runtimes are available', () => {
+  it('enables OCR when the runtime is available', () => {
     mockCapabilities({
       docling_available: true,
       crawl4ai_available: true,
@@ -75,8 +73,6 @@ describe('SettingsForm engine gating', () => {
     })
     render(<SettingsForm />)
 
-    expect(screen.queryByText('settings.enableDoclingHint')).not.toBeInTheDocument()
-    expect(screen.queryByText('settings.enableCrawl4aiHint')).not.toBeInTheDocument()
     expect(
       screen.getByRole('checkbox', { name: 'settings.ocrEnabled' })
     ).not.toBeDisabled()
@@ -87,7 +83,6 @@ describe('SettingsForm engine gating', () => {
     render(<SettingsForm />)
 
     // Optimistic default avoids a flash of disabled controls on a working setup.
-    expect(screen.queryByText('settings.enableDoclingHint')).not.toBeInTheDocument()
     expect(
       screen.getByRole('checkbox', { name: 'settings.ocrEnabled' })
     ).not.toBeDisabled()
@@ -98,8 +93,6 @@ describe('SettingsForm engine gating', () => {
     render(<SettingsForm />)
 
     // A failed probe must not advertise engines the backend couldn't verify.
-    expect(screen.getByText('settings.enableDoclingHint')).toBeInTheDocument()
-    expect(screen.getByText('settings.enableCrawl4aiHint')).toBeInTheDocument()
     expect(
       screen.getByRole('checkbox', { name: 'settings.ocrEnabled' })
     ).toBeDisabled()

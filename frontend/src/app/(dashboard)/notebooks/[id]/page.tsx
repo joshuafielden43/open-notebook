@@ -7,6 +7,7 @@ import { NotebookHeader } from '../components/NotebookHeader'
 import { SourcesColumn } from '../components/SourcesColumn'
 import { NotesColumn } from '../components/NotesColumn'
 import { ChatColumn } from '../components/ChatColumn'
+import { NotebookEpisodesSection } from '@/components/podcasts/NotebookEpisodesSection'
 import { useNotebook } from '@/lib/hooks/use-notebooks'
 import { useNotebookSources } from '@/lib/hooks/use-sources'
 import { useNotes } from '@/lib/hooks/use-notes'
@@ -43,6 +44,7 @@ export default function NotebookPage() {
   const {
     sources,
     isLoading: sourcesLoading,
+    isLoadingFull: sourcesLoadingFull,
     refetch: refetchSources,
     hasNextPage,
     isFetchingNextPage,
@@ -153,123 +155,136 @@ export default function NotebookPage() {
 
   return (
     <AppShell>
-      <div className="flex flex-col flex-1 min-h-0">
-        <div className="flex-shrink-0 p-6 pb-0">
-          <NotebookHeader notebook={notebook} />
-        </div>
+      {/*
+        Scroll the whole page. Workspace is min-h-full so Sources/Notes/Chat
+        still fill the viewport exactly as before; podcasts sit after that
+        block and only appear when you scroll — zero height stolen from columns.
+      */}
+      <div className="flex flex-1 min-h-0 flex-col overflow-y-auto">
+        <div className="flex min-h-full flex-col">
+          <div className="flex-shrink-0 p-6 pb-0">
+            <NotebookHeader notebook={notebook} />
+          </div>
 
-        <div className="flex-1 p-6 pt-6 overflow-x-auto flex flex-col">
-          {/* Mobile: Tabbed interface - only render on mobile to avoid double-mounting */}
-          {!isDesktop && (
-            <>
-              <div className="lg:hidden mb-4">
-                <Tabs value={mobileActiveTab} onValueChange={(value) => setMobileActiveTab(value as 'sources' | 'notes' | 'chat')}>
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="sources" className="gap-2">
-                      <FileText className="h-4 w-4" />
-                      {t('navigation.sources')}
-                    </TabsTrigger>
-                    <TabsTrigger value="notes" className="gap-2">
-                      <StickyNote className="h-4 w-4" />
-                      {t('common.notes')}
-                    </TabsTrigger>
-                    <TabsTrigger value="chat" className="gap-2">
-                      <MessageSquare className="h-4 w-4" />
-                      {t('common.chat')}
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
+          <div className="flex min-h-0 flex-1 flex-col overflow-x-auto p-6 pt-6">
+            {/* Mobile: Tabbed interface - only render on mobile to avoid double-mounting */}
+            {!isDesktop && (
+              <>
+                <div className="mb-4 lg:hidden">
+                  <Tabs value={mobileActiveTab} onValueChange={(value) => setMobileActiveTab(value as 'sources' | 'notes' | 'chat')}>
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="sources" className="gap-2">
+                        <FileText className="h-4 w-4" />
+                        {t('navigation.sources')}
+                      </TabsTrigger>
+                      <TabsTrigger value="notes" className="gap-2">
+                        <StickyNote className="h-4 w-4" />
+                        {t('common.notes')}
+                      </TabsTrigger>
+                      <TabsTrigger value="chat" className="gap-2">
+                        <MessageSquare className="h-4 w-4" />
+                        {t('common.chat')}
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+
+                {/* Mobile: Show only active tab */}
+                <div className="min-h-0 flex-1 overflow-hidden lg:hidden">
+                  {mobileActiveTab === 'sources' && (
+                    <SourcesColumn
+                      sources={sources}
+                      isLoading={sourcesLoading}
+                      notebookId={notebookId}
+                      notebookName={notebook?.name}
+                      onRefresh={refetchSources}
+                      contextSelections={contextSelections.sources}
+                      onContextModeChange={handleSourceContextModeChange}
+                      onBulkContextModeChange={handleBulkSourceContext}
+                      hasNextPage={hasNextPage}
+                      isFetchingNextPage={isFetchingNextPage}
+                      fetchNextPage={fetchNextPage}
+                    />
+                  )}
+                  {mobileActiveTab === 'notes' && (
+                    <NotesColumn
+                      notes={notes}
+                      isLoading={notesLoading}
+                      notebookId={notebookId}
+                      contextSelections={contextSelections.notes}
+                      onContextModeChange={handleNoteContextModeChange}
+                      onBulkContextModeChange={handleBulkNoteContext}
+                    />
+                  )}
+                  {mobileActiveTab === 'chat' && (
+                    <ChatColumn
+                      notebookId={notebookId}
+                      contextSelections={contextSelections}
+                      sources={sources}
+                      sourcesLoading={sourcesLoading}
+                      sourcesLoadingFull={sourcesLoadingFull}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Desktop: Collapsible columns layout */}
+            <div className={cn(
+              'hidden h-full min-h-0 gap-6 transition-all duration-150 lg:flex',
+              'flex-row'
+            )}>
+              {/* Sources Column */}
+              <div className={cn(
+                'transition-all duration-150',
+                sourcesCollapsed ? 'w-12 flex-shrink-0' : 'flex-none basis-1/3'
+              )}>
+                <SourcesColumn
+                  sources={sources}
+                  isLoading={sourcesLoading}
+                  notebookId={notebookId}
+                  notebookName={notebook?.name}
+                  onRefresh={refetchSources}
+                  contextSelections={contextSelections.sources}
+                  onContextModeChange={handleSourceContextModeChange}
+                  onBulkContextModeChange={handleBulkSourceContext}
+                  hasNextPage={hasNextPage}
+                  isFetchingNextPage={isFetchingNextPage}
+                  fetchNextPage={fetchNextPage}
+                />
               </div>
 
-              {/* Mobile: Show only active tab */}
-              <div className="flex-1 overflow-hidden lg:hidden">
-                {mobileActiveTab === 'sources' && (
-                  <SourcesColumn
-                    sources={sources}
-                    isLoading={sourcesLoading}
-                    notebookId={notebookId}
-                    notebookName={notebook?.name}
-                    onRefresh={refetchSources}
-                    contextSelections={contextSelections.sources}
-                    onContextModeChange={handleSourceContextModeChange}
-                    onBulkContextModeChange={handleBulkSourceContext}
-                    hasNextPage={hasNextPage}
-                    isFetchingNextPage={isFetchingNextPage}
-                    fetchNextPage={fetchNextPage}
-                  />
-                )}
-                {mobileActiveTab === 'notes' && (
-                  <NotesColumn
-                    notes={notes}
-                    isLoading={notesLoading}
-                    notebookId={notebookId}
-                    contextSelections={contextSelections.notes}
-                    onContextModeChange={handleNoteContextModeChange}
-                    onBulkContextModeChange={handleBulkNoteContext}
-                  />
-                )}
-                {mobileActiveTab === 'chat' && (
-                  <ChatColumn
-                    notebookId={notebookId}
-                    contextSelections={contextSelections}
-                    sources={sources}
-                    sourcesLoading={sourcesLoading}
-                  />
-                )}
+              {/* Notes Column */}
+              <div className={cn(
+                'transition-all duration-150',
+                notesCollapsed ? 'w-12 flex-shrink-0' : 'flex-none basis-1/3'
+              )}>
+                <NotesColumn
+                  notes={notes}
+                  isLoading={notesLoading}
+                  notebookId={notebookId}
+                  contextSelections={contextSelections.notes}
+                  onContextModeChange={handleNoteContextModeChange}
+                  onBulkContextModeChange={handleBulkNoteContext}
+                />
               </div>
-            </>
-          )}
 
-          {/* Desktop: Collapsible columns layout */}
-          <div className={cn(
-            'hidden lg:flex h-full min-h-0 gap-6 transition-all duration-150',
-            'flex-row'
-          )}>
-            {/* Sources Column */}
-            <div className={cn(
-              'transition-all duration-150',
-              sourcesCollapsed ? 'w-12 flex-shrink-0' : 'flex-none basis-1/3'
-            )}>
-              <SourcesColumn
-                sources={sources}
-                isLoading={sourcesLoading}
-                notebookId={notebookId}
-                notebookName={notebook?.name}
-                onRefresh={refetchSources}
-                contextSelections={contextSelections.sources}
-                onContextModeChange={handleSourceContextModeChange}
-                onBulkContextModeChange={handleBulkSourceContext}
-                hasNextPage={hasNextPage}
-                isFetchingNextPage={isFetchingNextPage}
-                fetchNextPage={fetchNextPage}
-              />
-            </div>
-
-            {/* Notes Column */}
-            <div className={cn(
-              'transition-all duration-150',
-              notesCollapsed ? 'w-12 flex-shrink-0' : 'flex-none basis-1/3'
-            )}>
-              <NotesColumn
-                notes={notes}
-                isLoading={notesLoading}
-                notebookId={notebookId}
-                contextSelections={contextSelections.notes}
-                onContextModeChange={handleNoteContextModeChange}
-                onBulkContextModeChange={handleBulkNoteContext}
-              />
-            </div>
-
-            {/* Chat Column - always expanded, takes remaining space */}
-            <div className="transition-all duration-150 flex-1 min-w-0 lg:pr-6 lg:-mr-6">
-              <ChatColumn
-                notebookId={notebookId}
-                contextSelections={contextSelections}
-                sources={sources}
-                sourcesLoading={sourcesLoading}
-              />
+              {/* Chat Column - always expanded, takes remaining space */}
+              <div className="min-w-0 flex-1 transition-all duration-150 lg:-mr-6 lg:pr-6">
+                <ChatColumn
+                  notebookId={notebookId}
+                  contextSelections={contextSelections}
+                  sources={sources}
+                  sourcesLoading={sourcesLoading}
+                  sourcesLoadingFull={sourcesLoadingFull}
+                />
+              </div>
             </div>
           </div>
+        </div>
+
+        <div className="flex-shrink-0 border-t px-6 py-4">
+          <NotebookEpisodesSection notebookId={notebookId} />
         </div>
       </div>
     </AppShell>

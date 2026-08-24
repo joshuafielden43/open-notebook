@@ -146,7 +146,7 @@ services:
     environment:
       # REQUIRED: Change this to your own secret string
       # This encrypts your API keys in the database
-      - OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me-to-a-secret-string
+      - OPEN_NOTEBOOK_ENCRYPTION_KEY=your-unique-secret-here
 
       # Database connection. SURREAL_USER / SURREAL_PASSWORD default to root:root
       # for local use; override them in a .env file before exposing the instance
@@ -167,7 +167,7 @@ services:
 ### Step 2: Set Your Encryption Key
 Edit `docker-compose.yml` and change this line:
 ```yaml
-- OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me-to-a-secret-string
+- OPEN_NOTEBOOK_ENCRYPTION_KEY=your-unique-secret-here
 ```
 to any secret value (e.g., `my-super-secret-key-123`)
 

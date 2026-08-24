@@ -1,14 +1,18 @@
 name: Tests
 
 on:
+  # Any PR (not only base=main) so feature-branch stacks still get the
+  # frontend typecheck/build gate that would have caught bare queryFn
+  # mismatches like listEpisodes(notebookId?) vs React Query context.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - '.github/workflows/claude*.yml'
+  # On-demand runs for any branch without opening a PR.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -31,6 +35,10 @@ jobs:
 
       - name: Install dependencies
         run: uv sync
+
+      # Podcast transcript-quality tests probe real audio via ffmpeg.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Run tests with coverage
         run: uv run pytest tests/ -v --cov=open_notebook --cov=api --cov-report=term-missing --cov-report=xml
@@ -155,5 +163,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Fail fast with tsc diagnostics before Next's bundled typecheck.
+      # Catches React Query queryFn signature mismatches that only show up
+      # once an API method gains an optional first param.
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Build
         run: npm run build
+
+  release-gate-scripts:
+    name: Release Gate Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Syntax-check release image gate
+        run: |
+          bash -n scripts/release-test/release-image-test.sh
+          bash -n scripts/release-test/rc-stack.sh
+          test -f scripts/release-test/docker-compose.release-test.yml
+          test -x scripts/release-test/release-image-test.sh || chmod +x scripts/release-test/release-image-test.sh
+
+      - name: Document full image gate (not on every PR)
+        run: |
+          echo "Full fresh+upgrade image gate remains maintainer/release path:"
+          echo "  make release-test  # or scripts/release-test/release-image-test.sh"
+          echo "Wire a scheduled/manual workflow when registry credentials are available."

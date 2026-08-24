@@ -2,6 +2,7 @@
 .PHONY: docker-buildx-prepare docker-buildx-clean docker-buildx-reset
 .PHONY: docker-push docker-push-latest docker-release docker-build-local tag export-docs
 .PHONY: release-test release-stack release-stack-down
+.PHONY: check-env up
 
 # Get version from pyproject.toml
 VERSION := $(shell grep -m1 version pyproject.toml | cut -d'"' -f2)
@@ -13,7 +14,16 @@ GHCR_IMAGE := ghcr.io/lfnovo/open-notebook
 # Build platforms
 PLATFORMS := linux/amd64,linux/arm64
 
-database:
+# Fail closed if encryption key is missing or a public placeholder.
+# See scripts/check-deploy-env.sh (host) and scripts/docker-entrypoint.sh (container).
+check-env:
+	@sh scripts/check-deploy-env.sh
+
+# Full stack from root docker-compose.yml (preflight + up).
+up: check-env
+	docker compose up -d
+
+database: check-env
 	docker compose up -d surrealdb
 
 run:
@@ -146,23 +156,23 @@ tag:
 	git push origin "v$$version"
 
 
-dev:
+dev: check-env
 	docker compose -f examples/docker-compose-dev.yml --project-directory . up --build
 
-full:
+full: check-env
 	docker compose -f examples/docker-compose-full-local.yml --project-directory . up --build
 
 
-api:
+api: check-env
 	uv run --env-file .env run_api.py
 
 .PHONY: worker worker-start worker-stop worker-restart
 
 worker: worker-start
 
-worker-start:
+worker-start: check-env
 	@echo "Starting surreal-commands worker..."
-	uv run --env-file .env surreal-commands-worker --import-modules commands --max-tasks "$${OPEN_NOTEBOOK_WORKER_MAX_TASKS:-5}"
+	OPEN_NOTEBOOK_IS_WORKER=1 uv run --env-file .env surreal-commands-worker --import-modules commands --max-tasks "$${OPEN_NOTEBOOK_WORKER_MAX_TASKS:-5}"
 
 worker-stop:
 	@echo "Stopping surreal-commands worker..."
@@ -182,7 +192,7 @@ start-all:
 	@uv run run_api.py &
 	@sleep 3
 	@echo "⚙️ Starting background worker..."
-	@uv run --env-file .env surreal-commands-worker --import-modules commands --max-tasks "$${OPEN_NOTEBOOK_WORKER_MAX_TASKS:-5}" &
+	@OPEN_NOTEBOOK_IS_WORKER=1 uv run --env-file .env surreal-commands-worker --import-modules commands --max-tasks "$${OPEN_NOTEBOOK_WORKER_MAX_TASKS:-5}" &
 	@sleep 2
 	@echo "🌐 Starting Next.js frontend..."
 	@echo "✅ All services started!"

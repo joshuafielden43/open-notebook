@@ -37,7 +37,7 @@ dependencies = [
     "tomli>=2.0.2",
     "python-dotenv>=1.2.2",
     "httpx[socks]>=0.27.0",
-    "content-core>=2.0.4,<3",
+    "content-core[docling]>=2.0.4,<3",
     "ai-prompter>=0.4,<1",
     "esperanto>=2.25.1,<3",
     "surrealdb>=1.0.4",
@@ -97,3 +97,9 @@ ignore = [
 # pipeline never imports. Drop this override once podcast-creator ships a
 # release without moviepy (already removed on its main branch).
 override-dependencies = ["pillow>=12.2.0"]
+
+[tool.uv.sources]
+# Keep podcast output schemas and in-progress outline/transcript checkpoints
+# enforced until these upstream fixes are released to PyPI. The lockfile pins
+# the exact reviewed commit.
+podcast-creator = { git = "https://github.com/joshuafielden43/podcast-creator.git", rev = "9bbd2d3" }

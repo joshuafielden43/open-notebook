@@ -1,8 +1,8 @@
 """
 Tests for GET /api/capabilities (api/routers/capabilities.py).
 
-The endpoint reports the *actual* availability of the opt-in heavy extraction
-runtimes (Docling, Crawl4AI local) so the frontend can gate engine options.
+The endpoint reports the *actual* availability of extraction runtimes so the
+frontend can gate engine options.
 These tests lock the composition rule: crawl4ai_available is true when EITHER a
 local package is installed OR a remote server is configured.
 """
@@ -18,6 +18,14 @@ def client():
     return TestClient(app)
 
 
+async def _fake_worker_status():
+    return {
+        "worker_likely_ready": True,
+        "pending_command_count": 0,
+        "running_command_count": 0,
+    }
+
+
 def _patch_probes(monkeypatch, *, docling, crawl4ai_local, crawl4ai_remote):
     monkeypatch.setattr(
         "api.routers.capabilities.docling_available", lambda: docling
@@ -30,6 +38,9 @@ def _patch_probes(monkeypatch, *, docling, crawl4ai_local, crawl4ai_remote):
     monkeypatch.setattr(
         "api.routers.capabilities.crawl4ai_local_ready", lambda: crawl4ai_local
     )
+    monkeypatch.setattr(
+        "api.routers.capabilities.get_worker_status", _fake_worker_status
+    )
 
 
 class TestCapabilitiesEndpoint:
@@ -39,11 +50,11 @@ class TestCapabilitiesEndpoint:
         )
         response = client.get("/api/capabilities")
         assert response.status_code == 200
-        assert response.json() == {
-            "docling_available": False,
-            "crawl4ai_available": False,
-            "crawl4ai_remote_configured": False,
-        }
+        body = response.json()
+        assert body["docling_available"] is False
+        assert body["crawl4ai_available"] is False
+        assert body["crawl4ai_remote_configured"] is False
+        assert body["worker_likely_ready"] is True
 
     def test_docling_available_is_independent_of_crawl4ai(self, client, monkeypatch):
         _patch_probes(

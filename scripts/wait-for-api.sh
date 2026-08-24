@@ -1,7 +1,7 @@
 #!/bin/sh
-# Wait for the API to be healthy before starting the frontend
-# This prevents the "Unable to Connect to API Server" error during startup
-# POSIX-compliant so it runs with /bin/sh (dash) in slim images
+# Wait for the API /health to be ready before starting the frontend.
+# Fail closed: do not start the UI over a dead or degraded API/worker.
+# POSIX-compliant for slim images (/bin/sh).
 
 API_URL="${INTERNAL_API_URL:-http://localhost:5055}"
 MAX_RETRIES=60
@@ -21,5 +21,5 @@ while [ $i -lt $MAX_RETRIES ]; do
 done
 
 echo "ERROR: API did not become ready within $((MAX_RETRIES * RETRY_INTERVAL)) seconds"
-echo "Starting frontend anyway - users may see connection errors initially"
-exit 0  # Exit 0 so frontend still starts (better than nothing)
+echo "Refusing to start frontend over an unhealthy API (north star: no silent babysitting)."
+exit 1

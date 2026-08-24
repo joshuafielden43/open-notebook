@@ -1,11 +1,8 @@
-"""
-Runtime availability probes for the opt-in heavy extraction engines.
+"""Runtime availability probes for extraction engines.
 
-Docling and local Crawl4AI are installed on demand at container startup (see
-scripts/docker-entrypoint.sh and
-docs/7-DEVELOPMENT/decisions/ADR-007-optin-runtimes.md), so availability is a
-*runtime* property: it cannot be read off the enable flags, and it does not
-survive a redeploy that drops them.
+Docling is baked into this fork's image and Crawl4AI is normally remote, but
+availability still needs probing so a bad image or unavailable service fails
+closed instead of silently breaking ingestion.
 
 This lives in open_notebook.utils (not api/) because both layers need it: the
 capabilities router reports it to the frontend, and the source-processing graph
@@ -67,10 +64,8 @@ def _default_playwright_cache() -> str | None:
 def _chromium_browser_present() -> bool:
     """True when a Playwright Chromium browser is installed on disk.
 
-    Local Crawl4AI needs both the package AND a Chromium browser. The startup
-    installer downloads them in separate steps and degrades gracefully, so the
-    package can be present while the browser download failed — checking the
-    browser here keeps this an honest "usable capability" signal.
+    Local Crawl4AI needs both the package AND a Chromium browser. Checking both
+    keeps this an honest "usable capability" signal for development images.
 
     Playwright installs browsers into PLAYWRIGHT_BROWSERS_PATH (Docker) or, when
     that's unset, its per-user default cache (dev). Resolving the path does not
@@ -98,16 +93,16 @@ def crawl4ai_available() -> bool:
     return crawl4ai_local_ready() or crawl4ai_remote_configured()
 
 
-# Engine name -> (availability probe, env var that enables it). Engines absent
+# Engine name -> (availability probe, operator remediation). Engines absent
 # from this map need no runtime and are always usable.
 _ENGINE_RUNTIMES: dict[str, tuple[str, str]] = {
-    "crawl4ai": ("crawl4ai_available", "OPEN_NOTEBOOK_ENABLE_CRAWL4AI"),
-    "docling": ("docling_available", "OPEN_NOTEBOOK_ENABLE_DOCLING"),
+    "crawl4ai": ("crawl4ai_available", "configure CRAWL4AI_API_URL"),
+    "docling": ("docling_available", "use the fork image with Docling baked in"),
 }
 
 
 def engine_runtime_missing(engine: str | None) -> str | None:
-    """Return the env var that would enable ``engine``, or None if it is usable.
+    """Return operator remediation for ``engine``, or None if it is usable.
 
     Used to avoid passing content-core an engine whose runtime is absent, which
     fails extraction outright with no indication of the real cause.

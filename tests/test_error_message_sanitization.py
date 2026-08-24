@@ -50,6 +50,29 @@ class TestSourcesRouterDoesNotLeakExceptionText:
         assert SECRET not in response.text
         assert response.json()["detail"] == "Error deleting source"
 
+    def test_qdrant_cleanup_failure_preserves_source(self, client):
+        mock_source = AsyncMock()
+        mock_source.id = "source:abc123"
+
+        with (
+            patch(
+                "api.routers.sources.Source.get",
+                new=AsyncMock(return_value=mock_source),
+            ),
+            patch("open_notebook.vectorstore.qdrant_enabled", return_value=True),
+            patch(
+                "open_notebook.vectorstore.delete_source_points",
+                new=AsyncMock(side_effect=RuntimeError(SECRET)),
+            ),
+        ):
+            response = client.delete("/api/sources/source:abc123")
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == (
+            "Vector cleanup failed; source was not deleted"
+        )
+        mock_source.delete.assert_not_awaited()
+
     def test_get_source_insights_failure_returns_generic_message(self, client):
         mock_source = AsyncMock()
         mock_source.get_insights = AsyncMock(side_effect=RuntimeError(SECRET))
@@ -108,68 +131,61 @@ class TestInvalidInputErrorsStillReturnTheirOwnSafeMessage:
 class TestPodcastServiceDoesNotLeakExceptionText:
     @pytest.mark.asyncio
     async def test_get_job_status_failure_returns_generic_message(self):
-        from fastapi import HTTPException
-
         from api.podcast_service import PodcastService
+        from open_notebook.exceptions import DatabaseOperationError
 
         with patch(
-            "api.podcast_service.get_command_status",
+            "api.command_service.CommandService.get_command_status",
             new=AsyncMock(side_effect=RuntimeError(SECRET)),
         ):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(DatabaseOperationError) as exc_info:
                 await PodcastService.get_job_status("command:abc123")
 
-        assert exc_info.value.status_code == 500
-        assert SECRET not in exc_info.value.detail
-        assert exc_info.value.detail == "Failed to get job status"
+        assert SECRET not in str(exc_info.value)
+        assert str(exc_info.value) == "Failed to get job status"
 
     @pytest.mark.asyncio
     async def test_list_episodes_failure_returns_generic_message(self):
-        from fastapi import HTTPException
-
         from api.podcast_service import PodcastService
+        from open_notebook.exceptions import DatabaseOperationError
         from open_notebook.podcasts.models import PodcastEpisode
 
         with patch.object(
             PodcastEpisode,
-            "get_all",
+            "list_summary",
             new=AsyncMock(side_effect=RuntimeError(SECRET)),
         ):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(DatabaseOperationError) as exc_info:
                 await PodcastService.list_episodes()
 
-        assert exc_info.value.status_code == 500
-        assert SECRET not in exc_info.value.detail
-        assert exc_info.value.detail == "Failed to list episodes"
+        assert SECRET not in str(exc_info.value)
+        assert str(exc_info.value) == "Failed to list episodes"
 
     @pytest.mark.asyncio
     async def test_get_episode_failure_returns_generic_not_found(self):
-        from fastapi import HTTPException
-
         from api.podcast_service import PodcastService
+        from open_notebook.exceptions import NotFoundError
         from open_notebook.podcasts.models import PodcastEpisode
 
         with patch.object(
             PodcastEpisode, "get", new=AsyncMock(side_effect=RuntimeError(SECRET))
         ):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(NotFoundError) as exc_info:
                 await PodcastService.get_episode("episode:missing")
 
-        assert exc_info.value.status_code == 404
-        assert SECRET not in exc_info.value.detail
-        assert exc_info.value.detail == "Episode not found"
+        assert SECRET not in str(exc_info.value)
+        assert str(exc_info.value) == "Episode not found"
 
     @pytest.mark.asyncio
     async def test_submit_generation_job_failure_returns_generic_message(self):
-        from fastapi import HTTPException
-
         from api.podcast_service import PodcastService
+        from open_notebook.exceptions import DatabaseOperationError
 
         with patch(
             "api.podcast_service.EpisodeProfile.get_by_name",
             new=AsyncMock(side_effect=RuntimeError(SECRET)),
         ):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(DatabaseOperationError) as exc_info:
                 await PodcastService.submit_generation_job(
                     episode_profile_name="default",
                     speaker_profile_name="default",
@@ -177,9 +193,8 @@ class TestPodcastServiceDoesNotLeakExceptionText:
                     content="some content",
                 )
 
-        assert exc_info.value.status_code == 500
-        assert SECRET not in exc_info.value.detail
-        assert exc_info.value.detail == "Failed to submit podcast generation job"
+        assert SECRET not in str(exc_info.value)
+        assert str(exc_info.value) == "Failed to submit podcast generation job"
 
 
 class TestTruncateErrorHelper:

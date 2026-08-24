@@ -37,8 +37,10 @@ class TestRealAppDefaultsToNoCredentialsWithWildcard:
 
     def test_real_response_does_not_claim_allow_credentials(self):
         client = TestClient(api_main.app)
+        # Hit `/` (always 200) rather than `/health`, which is readiness and
+        # returns 503 when the worker heartbeat is missing.
         response = client.get(
-            "/health", headers={"Origin": "https://evil.example.com"}
+            "/", headers={"Origin": "https://evil.example.com"}
         )
         assert response.status_code == 200
         assert "access-control-allow-credentials" not in {

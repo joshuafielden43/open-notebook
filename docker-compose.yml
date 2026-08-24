@@ -1,13 +1,18 @@
 services:
   surrealdb:
-    image: surrealdb/surrealdb:v2
+    # Pin a v2 patch line for reproducible deploys (not floating :v2 + always pull).
+    # v3 is Platform v-next; keep 127.0.0.1 bind — v2 has known unauth /rpc DoS if exposed.
+    image: surrealdb/surrealdb:v2.2.2
     # Credentials default to root:root for a zero-config local setup. Before
     # exposing this instance to a network, set SURREAL_USER / SURREAL_PASSWORD
     # in a .env file (see .env.example) — they are applied here and to the
     # open_notebook service below, so the two always stay in sync.
-    # List (exec) form so each interpolated value stays a single argument —
-    # a password containing spaces would otherwise be split into several.
-    command: ["start", "--log", "info", "--user", "${SURREAL_USER:-root}", "--pass", "${SURREAL_PASSWORD:-root}", "rocksdb:/mydata/mydatabase.db"]
+    # Credentials go via environment (SURREAL_USER / SURREAL_PASS), never argv:
+    # anything on the command line is visible to every process in `ps` output
+    # and lands in copy-pasted diagnostics. Note the server binary reads
+    # SURREAL_PASS while the app reads SURREAL_PASSWORD — both interpolate
+    # from the same .env value.
+    command: ["start", "--log", "info", "rocksdb:/mydata/mydatabase.db"]
     user: root  # Required for bind mounts on Linux
     ports:
       # Bound to localhost only: the open_notebook service reaches this over
@@ -20,18 +25,30 @@ services:
       - ./surreal_data:/mydata
     environment:
       - SURREAL_EXPERIMENTAL_GRAPHQL=true
+      - SURREAL_USER=${SURREAL_USER:-root}
+      - SURREAL_PASS=${SURREAL_PASSWORD:-root}
     restart: always
-    pull_policy: always
+    pull_policy: missing
+    healthcheck:
+      # Surreal image ships the `surreal` binary; is-ready probes the HTTP RPC.
+      test: ["CMD", "/surreal", "is-ready", "-u", "http://127.0.0.1:8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   open_notebook:
     image: lfnovo/open_notebook:v1-latest
     ports:
-      - "8502:8502"  # Web UI
-      - "5055:5055"  # REST API
+      # Localhost-only by default. Publish to a LAN/public interface only
+      # behind a reverse proxy with OPEN_NOTEBOOK_PASSWORD set (see security docs).
+      - "127.0.0.1:8502:8502"  # Web UI
+      - "127.0.0.1:5055:5055"  # REST API
     environment:
-      # REQUIRED: Change this to your own secret string
-      # This encrypts your API keys in the database
-      - OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me-to-a-secret-string
+      # REQUIRED (door + vault). Compose fails if empty; entrypoint/API also
+      # refuse known placeholders. Preflight: make check-env
+      - OPEN_NOTEBOOK_PASSWORD=${OPEN_NOTEBOOK_PASSWORD:?Set OPEN_NOTEBOOK_PASSWORD in .env — the API login}
+      - OPEN_NOTEBOOK_ENCRYPTION_KEY=${OPEN_NOTEBOOK_ENCRYPTION_KEY:?Set OPEN_NOTEBOOK_ENCRYPTION_KEY in .env — openssl rand -hex 32}
 
       # Database connection. SURREAL_USER / SURREAL_PASSWORD default to root:root
       # for local use; override them in a .env file before exposing the instance
@@ -42,12 +59,9 @@ services:
       - SURREAL_NAMESPACE=open_notebook
       - SURREAL_DATABASE=open_notebook
 
-      # OPTIONAL: heavy extraction runtimes, installed on first startup when
-      # enabled (downloads are cached on the ./notebook_data volume, so only the
-      # first boot is slow). See docs/5-CONFIGURATION/environment-reference.md.
-      # - OPEN_NOTEBOOK_ENABLE_DOCLING=true    # Docling engine + OCR + image sources (large ML stack)
-      # - OPEN_NOTEBOOK_ENABLE_CRAWL4AI=true   # local Crawl4AI (bundles a Chromium browser)
-      # - CRAWL4AI_API_URL=http://crawl4ai:11235  # use a remote Crawl4AI server instead (no local install)
+      # OPTIONAL: remote Crawl4AI service. Docling is baked into this fork's
+      # image; application startup never mutates its Python environment.
+      # - CRAWL4AI_API_URL=http://crawl4ai:11235
 
       # OPTIONAL: max concurrent background tasks the worker processes at once
       # (default 5). Set to 1 for sequential processing on single-GPU / local
@@ -56,6 +70,14 @@ services:
     volumes:
       - ./notebook_data:/app/data
     depends_on:
-      - surrealdb
+      surrealdb:
+        condition: service_healthy
+    healthcheck:
+      # /health is readiness: DB + worker_likely_ready (503 when degraded).
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5055/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 90s
     restart: always
     pull_policy: always

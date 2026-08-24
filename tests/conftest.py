@@ -9,10 +9,11 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure password auth is disabled for tests BEFORE any imports
-# The PasswordAuthMiddleware skips auth when this env var is not set
-# Set to empty string instead of deleting to prevent it from being reloaded
+# Tests run without real deploy secrets: empty password disables auth middleware,
+# and ALLOW_INSECURE_DEFAULTS lets API lifespan / deploy_env fail open.
+# Set BEFORE dotenv so a developer .env cannot re-enable password in the suite.
 os.environ["OPEN_NOTEBOOK_PASSWORD"] = ""
+os.environ["OPEN_NOTEBOOK_ALLOW_INSECURE_DEFAULTS"] = "1"
 
 # Load environment variables from .env file
 # This must be done BEFORE any imports that depend on environment variables

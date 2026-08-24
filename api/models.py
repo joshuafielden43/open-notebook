@@ -322,13 +322,13 @@ class SourceCreate(BaseModel):
         max_length=50,
         description="Transformation IDs to apply (max 50)",
     )
-    embed: bool = Field(False, description="Whether to embed content for vector search")
+    embed: bool = Field(True, description="Whether to embed content for vector search")
     delete_source: bool = Field(
         False, description="Whether to delete uploaded file after processing"
     )
-    # New async processing support
     async_processing: bool = Field(
-        False, description="Whether to process source asynchronously"
+        False,
+        description="Deprecated compatibility flag; source processing always runs in the background",
     )
 
     @model_validator(mode="after")
@@ -606,7 +606,7 @@ class CapabilitiesResponse(BaseModel):
     """Runtime availability of the opt-in heavy extraction engines.
 
     Reflects what is actually importable/reachable in this container — not merely
-    what the OPEN_NOTEBOOK_ENABLE_* flags request — so the UI can gate engine
+    what configuration requests — so the UI can gate engine
     options honestly (e.g. still show "unavailable" while a first-boot install
     is in progress). See docs/7-DEVELOPMENT/decisions/ADR-007-optin-runtimes.md.
     """
@@ -622,6 +622,22 @@ class CapabilitiesResponse(BaseModel):
     crawl4ai_remote_configured: bool = Field(
         ...,
         description="A remote Crawl4AI endpoint is configured via CRAWL4AI_API_URL (no local install needed).",
+    )
+    worker_likely_ready: bool = Field(
+        True,
+        description=(
+            "Heuristic: the surreal-commands worker appears able to claim jobs. "
+            "False when pending commands have been sitting with no recent "
+            "running/completed work (common when worker-start was skipped)."
+        ),
+    )
+    pending_command_count: int = Field(
+        0,
+        description="Count of command rows currently pending/queued.",
+    )
+    running_command_count: int = Field(
+        0,
+        description="Count of command rows currently running.",
     )
 
 

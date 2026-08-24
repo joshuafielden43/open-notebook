@@ -1,6 +1,6 @@
 services:
   surrealdb:
-    image: surrealdb/surrealdb:v2
+    image: surrealdb/surrealdb:v2.2.2
     command: start --log info --user root --pass root rocksdb:/mydata/test.db
     user: root
     volumes:
@@ -16,7 +16,10 @@ services:
       # at host:5055 — on a dev machine that is the development API, not this
       # stack (silent data crossover between environments!)
       - API_URL=${RC_API_URL:-}
-      - OPEN_NOTEBOOK_ENCRYPTION_KEY=${RC_ENCRYPTION_KEY:-release-test-key}
+      - OPEN_NOTEBOOK_ENCRYPTION_KEY=${RC_ENCRYPTION_KEY:-release-test-key-not-a-placeholder}
+      - OPEN_NOTEBOOK_PASSWORD=${RC_PASSWORD:-release-test-password}
+      # Lab gate: entrypoint/deploy_env require door+vault; this stack is disposable.
+      - OPEN_NOTEBOOK_ALLOW_INSECURE_DEFAULTS=${RC_ALLOW_INSECURE:-1}
       - SURREAL_URL=ws://surrealdb:8000/rpc
       - SURREAL_USER=root
       - SURREAL_PASSWORD=root
@@ -25,8 +28,6 @@ services:
       # Opt-in heavy runtimes: empty by default (fresh/upgrade tests stay fast);
       # rc-stack.sh --with-runtimes sets these to install Docling/Crawl4AI so the
       # published image's opt-in path can be exercised with real data.
-      - OPEN_NOTEBOOK_ENABLE_DOCLING=${RC_ENABLE_DOCLING:-}
-      - OPEN_NOTEBOOK_ENABLE_CRAWL4AI=${RC_ENABLE_CRAWL4AI:-}
     volumes:
       - ${DATA_DIR}/notebook:/app/data
     # Reach host services (e.g. Ollama on localhost:11434) via

@@ -58,7 +58,9 @@ from open_notebook.exceptions import (
     RateLimitError,
     UnsupportedTypeException,
 )
-from open_notebook.utils.encryption import get_secret_from_env
+from open_notebook.logging_config import configure_safe_logging
+
+configure_safe_logging()
 
 
 def _parse_cors_origins(raw: str) -> list[str]:
@@ -119,8 +121,11 @@ def _cors_headers(request: Request) -> dict[str, str]:
     return headers
 
 
-# Import commands to register them in the API process
+# Register all worker commands in the API process so submit_command validates.
 try:
+    from commands.register import ensure_commands_registered
+
+    ensure_commands_registered()
     logger.info("Commands imported in API process")
 except Exception as e:
     logger.error(f"Failed to import commands in API process: {e}")
@@ -179,6 +184,17 @@ async def _run_database_migrations() -> None:
     else:
         logger.info("Database is already at the latest version. No migrations needed.")
 
+    # Vector indexes are dimension-adaptive and provisioned outside the shared
+    # migrations (ADR-014). A failure here must not block startup: search still
+    # works on the scan-based fn::vector_search from the migrations.
+    try:
+        from open_notebook.database.vector_index import ensure_vector_indexes
+
+        outcome = await ensure_vector_indexes()
+        logger.info(f"Vector index provisioning: {outcome}")
+    except Exception as e:
+        logger.warning(f"Vector index provisioning skipped: {e}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -189,15 +205,17 @@ async def lifespan(app: FastAPI):
     # Startup: Security checks
     logger.info("Starting API initialization...")
 
-    # Security check: Encryption key
-    if not get_secret_from_env("OPEN_NOTEBOOK_ENCRYPTION_KEY"):
-        logger.warning(
-            "OPEN_NOTEBOOK_ENCRYPTION_KEY not set. "
-            "API key encryption will fail until this is configured. "
-            "Set OPEN_NOTEBOOK_ENCRYPTION_KEY to any secret string."
-        )
+    # Door (password) + vault (encryption key). Same policy as
+    # open_notebook.deploy_env / scripts/check-deploy-env.sh / entrypoint.
+    from open_notebook.deploy_env import check_deploy_env
 
-    # Run database migrations
+    for issue in check_deploy_env():
+        if issue.fatal:
+            logger.error(issue.message)
+            raise RuntimeError(issue.message)
+        logger.warning(issue.message)
+
+    # Run database migrations (file lock serializes concurrent API processes)
 
     try:
         await _run_database_migrations()
@@ -213,6 +231,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown: cleanup if needed
+    from open_notebook.database.repository import close_db_pool
+
+    await close_db_pool()
     logger.info("API shutdown complete")
 
 
@@ -413,4 +434,47 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    """Readiness-aware health: non-2xx when DB or worker is not ready.
+
+    Liveness-only probes that need HTTP 200 regardless should hit `/`.
+    Orchestrators and wait-for-api should treat 503 as not ready.
+    """
+    from fastapi.responses import JSONResponse
+
+    from open_notebook.jobs import get_worker_status
+
+    db_status = "unknown"
+    try:
+        from open_notebook.database.repository import repo_query
+
+        await repo_query("RETURN 1")
+        db_status = "ok"
+    except Exception:
+        db_status = "error"
+
+    # Opportunistic reaper so zombies clear without requiring a UI poll.
+    try:
+        from open_notebook.jobs import fail_stale_running_commands
+
+        await fail_stale_running_commands()
+    except Exception:
+        pass
+
+    worker = await get_worker_status()
+    worker_ready = bool(worker.get("worker_likely_ready", False))
+    overall = "healthy"
+    if db_status != "ok":
+        overall = "unhealthy"
+    elif not worker_ready:
+        overall = "degraded"
+
+    body = {
+        "status": overall,
+        "database": db_status,
+        "worker_likely_ready": worker_ready,
+        "pending_command_count": int(worker.get("pending_command_count") or 0),
+        "running_command_count": int(worker.get("running_command_count") or 0),
+    }
+    # Degraded/unhealthy → 503 so curl -f and k8s readiness fail closed.
+    status_code = 200 if overall == "healthy" else 503
+    return JSONResponse(content=body, status_code=status_code)

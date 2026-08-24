@@ -1,9 +1,7 @@
-"""Tests for the opt-in runtime availability probes.
+"""Tests for extraction runtime availability probes.
 
-The engine choice lives in the database; the runtime that serves it comes from
-environment flags evaluated at boot. engine_runtime_missing() is what keeps the
-two from drifting into a state where extraction is routed to a runtime that
-isn't installed.
+``engine_runtime_missing()`` keeps stored engine choices from routing work to
+an unavailable image capability or remote service.
 """
 
 from unittest.mock import patch
@@ -25,13 +23,13 @@ class TestEngineRuntimeMissing:
         """An engine we don't know about is content-core's problem, not ours."""
         assert engine_runtime_missing("some-future-engine") is None
 
-    def test_crawl4ai_reports_its_env_var_when_absent(self):
+    def test_crawl4ai_reports_remediation_when_absent(self):
         with patch(
             "open_notebook.utils.runtime_capabilities.crawl4ai_available",
             return_value=False,
         ):
             assert (
-                engine_runtime_missing("crawl4ai") == "OPEN_NOTEBOOK_ENABLE_CRAWL4AI"
+                engine_runtime_missing("crawl4ai") == "configure CRAWL4AI_API_URL"
             )
 
     def test_crawl4ai_is_usable_when_available(self):
@@ -41,12 +39,12 @@ class TestEngineRuntimeMissing:
         ):
             assert engine_runtime_missing("crawl4ai") is None
 
-    def test_docling_reports_its_env_var_when_absent(self):
+    def test_docling_reports_remediation_when_absent(self):
         with patch(
             "open_notebook.utils.runtime_capabilities.docling_available",
             return_value=False,
         ):
-            assert engine_runtime_missing("docling") == "OPEN_NOTEBOOK_ENABLE_DOCLING"
+            assert engine_runtime_missing("docling") == "use the fork image with Docling baked in"
 
     def test_docling_is_usable_when_available(self):
         with patch(
@@ -63,7 +61,7 @@ class TestEngineRuntimeMissing:
         ):
             assert (
                 engine_runtime_missing("  Crawl4AI  ")
-                == "OPEN_NOTEBOOK_ENABLE_CRAWL4AI"
+                == "configure CRAWL4AI_API_URL"
             )
 
     def test_remote_crawl4ai_counts_as_available(self):

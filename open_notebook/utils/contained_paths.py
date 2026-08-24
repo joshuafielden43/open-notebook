@@ -42,9 +42,7 @@ def to_relative_path(
     resolved = Path(os.path.realpath(raw))
     base = resolved_root(root)
     if resolved == base or not resolved.is_relative_to(base):
-        raise ValueError(
-            f"Generated {kind} path is outside the storage root: {path}"
-        )
+        raise ValueError(f"Generated {kind} path is outside the storage root: {path}")
     return resolved.relative_to(base).as_posix()
 
 

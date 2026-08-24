@@ -14,9 +14,7 @@ def _run(env: dict, env_file: Path | None = None) -> subprocess.CompletedProcess
     cmd = ["sh", str(SCRIPT)]
     if env_file is not None:
         cmd.append(str(env_file))
-    clean = {
-        k: v for k, v in os.environ.items() if not k.startswith("OPEN_NOTEBOOK_")
-    }
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("OPEN_NOTEBOOK_")}
     clean.update(env)
     return subprocess.run(
         cmd,

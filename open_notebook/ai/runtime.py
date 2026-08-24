@@ -66,9 +66,7 @@ async def resolve_model_config(
         if credential:
             config = credential.to_esperanto_config()
             await _revalidate_config_urls(config, model.provider)
-            logger.debug(
-                f"Using credential '{credential.name}' for model {model.name}"
-            )
+            logger.debug(f"Using credential '{credential.name}' for model {model.name}")
         else:
             logger.warning(
                 f"Model {model.id} has credential {model.credential} but it "

@@ -28,9 +28,7 @@ class TestEngineRuntimeMissing:
             "open_notebook.utils.runtime_capabilities.crawl4ai_available",
             return_value=False,
         ):
-            assert (
-                engine_runtime_missing("crawl4ai") == "configure CRAWL4AI_API_URL"
-            )
+            assert engine_runtime_missing("crawl4ai") == "configure CRAWL4AI_API_URL"
 
     def test_crawl4ai_is_usable_when_available(self):
         with patch(
@@ -44,7 +42,10 @@ class TestEngineRuntimeMissing:
             "open_notebook.utils.runtime_capabilities.docling_available",
             return_value=False,
         ):
-            assert engine_runtime_missing("docling") == "use the fork image with Docling baked in"
+            assert (
+                engine_runtime_missing("docling")
+                == "use the fork image with Docling baked in"
+            )
 
     def test_docling_is_usable_when_available(self):
         with patch(
@@ -60,17 +61,19 @@ class TestEngineRuntimeMissing:
             return_value=False,
         ):
             assert (
-                engine_runtime_missing("  Crawl4AI  ")
-                == "configure CRAWL4AI_API_URL"
+                engine_runtime_missing("  Crawl4AI  ") == "configure CRAWL4AI_API_URL"
             )
 
     def test_remote_crawl4ai_counts_as_available(self):
         """CRAWL4AI_API_URL offloads rendering — no local install needed."""
-        with patch(
-            "open_notebook.utils.runtime_capabilities.crawl4ai_local_ready",
-            return_value=False,
-        ), patch(
-            "open_notebook.utils.runtime_capabilities.crawl4ai_remote_configured",
-            return_value=True,
+        with (
+            patch(
+                "open_notebook.utils.runtime_capabilities.crawl4ai_local_ready",
+                return_value=False,
+            ),
+            patch(
+                "open_notebook.utils.runtime_capabilities.crawl4ai_remote_configured",
+                return_value=True,
+            ),
         ):
             assert engine_runtime_missing("crawl4ai") is None

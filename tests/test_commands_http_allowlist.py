@@ -14,9 +14,7 @@ from api.routers.commands import CommandExecutionRequest
 @pytest.mark.asyncio
 async def test_execute_command_rejects_unknown_command():
     submit = AsyncMock(return_value="command:should-not-run")
-    with patch.object(
-        commands_router.CommandService, "submit_command_job", new=submit
-    ):
+    with patch.object(commands_router.CommandService, "submit_command_job", new=submit):
         with pytest.raises(HTTPException) as ei:
             await commands_router.execute_command(
                 CommandExecutionRequest(
@@ -51,9 +49,7 @@ async def test_execute_command_allows_allowlisted(monkeypatch):
         frozenset({("open_notebook", "rebuild_embeddings")}),
     )
     submit = AsyncMock(return_value="command:ok")
-    with patch.object(
-        commands_router.CommandService, "submit_command_job", new=submit
-    ):
+    with patch.object(commands_router.CommandService, "submit_command_job", new=submit):
         resp = await commands_router.execute_command(
             CommandExecutionRequest(
                 command="rebuild_embeddings",

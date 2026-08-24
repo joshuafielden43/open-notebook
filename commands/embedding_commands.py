@@ -507,9 +507,13 @@ async def rebuild_embeddings_command(
         # embed job re-provisions via reindex_if_drained().
         try:
             await drop_vector_indexes()
-            logger.info("Vector indexes dropped for rebuild; will re-provision on drain")
+            logger.info(
+                "Vector indexes dropped for rebuild; will re-provision on drain"
+            )
         except Exception as drop_error:
-            logger.warning(f"Could not drop vector indexes before rebuild: {drop_error}")
+            logger.warning(
+                f"Could not drop vector indexes before rebuild: {drop_error}"
+            )
 
         # Collect items to process (returns IDs only)
         items = await collect_items_for_rebuild(

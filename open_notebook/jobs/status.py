@@ -98,9 +98,7 @@ async def get_worker_status() -> dict[str, Any]:
             if recent:
                 recent_activity = int(recent[0].get("c") or 0)
         except Exception as window_err:
-            logger.warning(
-                f"Worker recent-activity window unavailable: {window_err}"
-            )
+            logger.warning(f"Worker recent-activity window unavailable: {window_err}")
             recent_activity = 0
     except Exception as e:
         logger.warning(f"Worker status probe failed: {e}")

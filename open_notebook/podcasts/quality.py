@@ -89,9 +89,7 @@ def _outline_restart(dialogue: list[str], outline: Any) -> tuple[int, int] | Non
         _tokens(f"{_value(segment, 'name')} {_value(segment, 'description')}")
         for segment in segments
     ]
-    token_frequency = Counter(
-        token for tokens in segment_tokens for token in tokens
-    )
+    token_frequency = Counter(token for tokens in segment_tokens for token in tokens)
     distinctive = [
         {token for token in tokens if token_frequency[token] == 1}
         for tokens in segment_tokens

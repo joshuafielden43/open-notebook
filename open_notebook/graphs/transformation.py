@@ -35,15 +35,22 @@ async def run_transformation(state: dict, config: RunnableConfig) -> dict:
         # plain render variable into a fixed, developer-authored template instead.
         # See docs/7-DEVELOPMENT/security.md (GHSA-f35w-wx37-26q7).
         instructions = transformation.prompt
-        default_prompts: DefaultPrompts = DefaultPrompts(transformation_instructions=None)
+        default_prompts: DefaultPrompts = DefaultPrompts(
+            transformation_instructions=None
+        )
         if default_prompts.transformation_instructions:
-            instructions = f"{default_prompts.transformation_instructions}\n\n{instructions}"
+            instructions = (
+                f"{default_prompts.transformation_instructions}\n\n{instructions}"
+            )
 
         system_prompt = Prompter(prompt_template="transformation/execute").render(
             data={**state, "instructions": instructions}
         )
         content_str = str(content) if content else ""
-        payload = [SystemMessage(content=system_prompt), HumanMessage(content=content_str)]
+        payload = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=content_str),
+        ]
         chain = await provision_langchain_model(
             str(payload),
             config.get("configurable", {}).get("model_id"),

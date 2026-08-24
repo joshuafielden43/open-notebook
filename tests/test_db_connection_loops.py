@@ -30,9 +30,7 @@ async def test_off_home_loop_gets_direct_connection():
     with (
         patch.object(repository, "_pool", pool),
         patch.object(repository, "_pool_loop", sentinel_loop),
-        patch.object(
-            repository, "_open_connection", new=AsyncMock(return_value=fake)
-        ),
+        patch.object(repository, "_open_connection", new=AsyncMock(return_value=fake)),
     ):
         async with repository.db_connection() as db:
             assert db is fake

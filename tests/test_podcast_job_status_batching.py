@@ -119,9 +119,7 @@ class TestGetJobDetailsForCommandsUnit:
                 new=AsyncMock(return_value=fake_rows),
             ),
         ):
-            result = await PodcastEpisode.get_job_details_for_commands(
-                ["command:dead"]
-            )
+            result = await PodcastEpisode.get_job_details_for_commands(["command:dead"])
 
         assert result["command:dead"]["status"] == "failed"
         assert "quality gate" in (result["command:dead"]["error_message"] or "")
@@ -278,9 +276,7 @@ class TestListPodcastEpisodesUsesBatchedLookup:
     @pytest.mark.asyncio
     async def test_error_message_propagates_from_batch_result(self):
         episode = make_episode(command="command:err", suffix="err")
-        batch_result = {
-            "command:err": {"status": "failed", "error_message": "kaboom"}
-        }
+        batch_result = {"command:err": {"status": "failed", "error_message": "kaboom"}}
 
         with (
             patch(

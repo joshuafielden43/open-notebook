@@ -34,9 +34,7 @@ PodcastProgressCallback = Callable[[str, object], Awaitable[None]]
 MAX_TRANSCRIPT_QUALITY_ATTEMPTS = 2
 
 _MEAN_VOLUME_RE = re.compile(r"mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", re.I)
-_DURATION_RE = re.compile(
-    r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", re.I
-)
+_DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", re.I)
 
 
 class TranscriptQualityError(ValueError):
@@ -58,9 +56,7 @@ class PodcastCancelledError(RuntimeError):
 
     def __init__(self, command_id: str):
         self.command_id = command_id
-        super().__init__(
-            f"Podcast job {command_id} was cancelled; aborting generation"
-        )
+        super().__init__(f"Podcast job {command_id} was cancelled; aborting generation")
 
 
 def quality_repair_briefing(briefing: str, issues: list[str]) -> str:
@@ -134,9 +130,7 @@ def _probe_ffmpeg_audio(path: Path) -> tuple[Optional[float], Optional[float]]:
     dmatch = _DURATION_RE.search(stderr)
     if dmatch:
         hours, minutes, seconds = dmatch.groups()
-        duration = (
-            int(hours) * 3600 + int(minutes) * 60 + float(seconds)
-        )
+        duration = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
     return duration, mean_volume
 
 
@@ -197,14 +191,10 @@ def materialize_job_local_kwargs(
     if episode_name and not kwargs.get("_resolved_episode"):
         episode_config = load_episode_config(episode_name)
         kwargs["_resolved_episode"] = episode_config
-        kwargs["speaker_config"] = (
-            speaker_name or episode_config.speaker_config
-        )
+        kwargs["speaker_config"] = speaker_name or episode_config.speaker_config
         kwargs.setdefault("outline_provider", episode_config.outline_provider)
         kwargs.setdefault("outline_model", episode_config.outline_model)
-        kwargs.setdefault(
-            "transcript_provider", episode_config.transcript_provider
-        )
+        kwargs.setdefault("transcript_provider", episode_config.transcript_provider)
         kwargs.setdefault("transcript_model", episode_config.transcript_model)
         kwargs.setdefault("num_segments", episode_config.num_segments)
         if kwargs.get("outline_config") is None:
@@ -454,9 +444,7 @@ async def _run_staged_podcast(
     if state.get("transcript"):
         transcript_path = output_path / "transcript.json"
         rows = state["transcript"]
-        payload = [
-            d.model_dump() if hasattr(d, "model_dump") else d for d in rows
-        ]
+        payload = [d.model_dump() if hasattr(d, "model_dump") else d for d in rows]
         transcript_path.write_text(_json.dumps(payload, indent=2, default=str))
 
     if progress_callback:
@@ -483,8 +471,7 @@ def derive_generation_stage(
     if status in ("failed", "error"):
         return "failed"
     if status in ("completed",) or (
-        has_audio
-        and status not in ("running", "processing", "pending", "submitted")
+        has_audio and status not in ("running", "processing", "pending", "submitted")
     ):
         if has_audio:
             return "completed"

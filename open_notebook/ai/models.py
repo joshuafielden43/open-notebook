@@ -128,7 +128,9 @@ class Model(ObjectModel):
         try:
             return await Credential.get(self.credential)
         except Exception:
-            logger.warning(f"Could not load credential {self.credential} for model {self.id}")
+            logger.warning(
+                f"Could not load credential {self.credential} for model {self.id}"
+            )
             return None
 
 

@@ -83,9 +83,7 @@ class EpisodeProfile(ObjectModel):
                 f"Episode profile '{self.name}' has no outline model configured. "
                 "Please update the profile to select an outline model."
             )
-        return await resolve_model_config(
-            self.outline_llm, max_tokens=self.max_tokens
-        )
+        return await resolve_model_config(self.outline_llm, max_tokens=self.max_tokens)
 
     async def resolve_transcript_config(self) -> Tuple[str, str, dict]:
         """Resolve transcript model -> (provider, model_name, config_dict)"""
@@ -125,9 +123,7 @@ class SpeakerProfile(ObjectModel):
     description: Optional[str] = Field(None, description="Profile description")
 
     # Model registry reference
-    voice_model: Optional[str] = Field(
-        None, description="Model record ID for TTS"
-    )
+    voice_model: Optional[str] = Field(None, description="Model record ID for TTS")
 
     speakers: List[Dict[str, Any]] = Field(
         ..., description="Array of speaker configurations"
@@ -188,9 +184,7 @@ class SpeakerProfile(ObjectModel):
         return None
 
     @classmethod
-    async def resolve(
-        cls, ref: Union[str, RecordID]
-    ) -> Optional["SpeakerProfile"]:
+    async def resolve(cls, ref: Union[str, RecordID]) -> Optional["SpeakerProfile"]:
         """Resolve a speaker profile by record ID or by unique name.
 
         The API contract accepts speaker profiles by NAME (see
@@ -401,9 +395,7 @@ class PodcastEpisode(ObjectModel):
         return detail.get("status")
 
     @classmethod
-    async def claim_for_retry(
-        cls, episode_id: str, expected_command: str
-    ) -> bool:
+    async def claim_for_retry(cls, episode_id: str, expected_command: str) -> bool:
         """Compare-and-swap claim so two retries cannot share one episode row.
 
         Succeeds only when ``episode.command`` still equals the failed command
@@ -436,9 +428,7 @@ class PodcastEpisode(ObjectModel):
             return False
 
     @classmethod
-    async def restore_command_link(
-        cls, episode_id: str, command_id: str
-    ) -> None:
+    async def restore_command_link(cls, episode_id: str, command_id: str) -> None:
         """Restore the prior command link after a failed retry submit.
 
         Only writes when command is still NONE (the claimed state) so we never

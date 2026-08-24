@@ -537,7 +537,9 @@ class TestTransformationModelIdForwarding:
     """
 
     @pytest.mark.asyncio
-    @patch("open_notebook.graphs.source.transform_graph.ainvoke", new_callable=AsyncMock)
+    @patch(
+        "open_notebook.graphs.source.transform_graph.ainvoke", new_callable=AsyncMock
+    )
     async def test_source_graph_forwards_model_id(self, mock_ainvoke):
         """open_notebook.graphs.source.transform_content forwards model_id."""
         from open_notebook.domain.transformation import Transformation
@@ -563,7 +565,9 @@ class TestTransformationModelIdForwarding:
         assert config["configurable"]["model_id"] == "model:custom"
 
     @pytest.mark.asyncio
-    @patch("open_notebook.graphs.source.transform_graph.ainvoke", new_callable=AsyncMock)
+    @patch(
+        "open_notebook.graphs.source.transform_graph.ainvoke", new_callable=AsyncMock
+    )
     async def test_source_graph_forwards_none_model_id(self, mock_ainvoke):
         """When model_id is unset (None), None is forwarded (falls back to default)."""
         from open_notebook.domain.transformation import Transformation

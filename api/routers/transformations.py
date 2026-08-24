@@ -50,9 +50,7 @@ async def get_transformations():
         raise
     except Exception as e:
         logger.error(f"Error fetching transformations: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error fetching transformations"
-        )
+        raise HTTPException(status_code=500, detail="Error fetching transformations")
 
 
 @router.post("/transformations", response_model=TransformationResponse)
@@ -85,9 +83,7 @@ async def create_transformation(transformation_data: TransformationCreate):
         raise
     except Exception as e:
         logger.error(f"Error creating transformation: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error creating transformation"
-        )
+        raise HTTPException(status_code=500, detail="Error creating transformation")
 
 
 @router.post("/transformations/execute", response_model=TransformationExecuteResponse)
@@ -131,9 +127,7 @@ async def execute_transformation(execute_request: TransformationExecuteRequest):
         raise  # Let global exception handlers return proper status codes
     except Exception as e:
         logger.error(f"Error executing transformation: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error executing transformation"
-        )
+        raise HTTPException(status_code=500, detail="Error executing transformation")
 
 
 @router.get("/transformations/default-prompt", response_model=DefaultPromptResponse)
@@ -152,9 +146,7 @@ async def get_default_prompt():
         raise
     except Exception as e:
         logger.error(f"Error fetching default prompt: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error fetching default prompt"
-        )
+        raise HTTPException(status_code=500, detail="Error fetching default prompt")
 
 
 @router.put("/transformations/default-prompt", response_model=DefaultPromptResponse)
@@ -177,9 +169,7 @@ async def update_default_prompt(prompt_update: DefaultPromptUpdate):
         raise
     except Exception as e:
         logger.error(f"Error updating default prompt: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error updating default prompt"
-        )
+        raise HTTPException(status_code=500, detail="Error updating default prompt")
 
 
 @router.get(
@@ -199,9 +189,7 @@ async def get_transformation(transformation_id: str):
         raise
     except Exception as e:
         logger.error(f"Error fetching transformation {transformation_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error fetching transformation"
-        )
+        raise HTTPException(status_code=500, detail="Error fetching transformation")
 
 
 @router.put(
@@ -246,9 +234,7 @@ async def update_transformation(
         raise
     except Exception as e:
         logger.error(f"Error updating transformation {transformation_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error updating transformation"
-        )
+        raise HTTPException(status_code=500, detail="Error updating transformation")
 
 
 @router.delete("/transformations/{transformation_id}")
@@ -268,6 +254,4 @@ async def delete_transformation(transformation_id: str):
         raise
     except Exception as e:
         logger.error(f"Error deleting transformation {transformation_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error deleting transformation"
-        )
+        raise HTTPException(status_code=500, detail="Error deleting transformation")

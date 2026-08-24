@@ -134,9 +134,7 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
         raise
     except Exception as e:
         logger.error(f"Error fetching chat sessions: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error fetching chat sessions"
-        )
+        raise HTTPException(status_code=500, detail="Error fetching chat sessions")
 
 
 @router.post("/chat/sessions", response_model=ChatSessionResponse)
@@ -150,8 +148,7 @@ async def create_session(request: CreateSessionRequest):
 
         # Create new session
         session = ChatSession(
-            title=request.title
-            or f"Chat Session {time.time():.0f}",
+            title=request.title or f"Chat Session {time.time():.0f}",
             model_override=request.model_override,
         )
         await session.save()
@@ -176,9 +173,7 @@ async def create_session(request: CreateSessionRequest):
         raise
     except Exception as e:
         logger.error(f"Error creating chat session: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error creating chat session"
-        )
+        raise HTTPException(status_code=500, detail="Error creating chat session")
 
 
 @router.get(

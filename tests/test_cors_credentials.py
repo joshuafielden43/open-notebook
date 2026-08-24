@@ -29,9 +29,7 @@ class TestRealAppDefaultsToNoCredentialsWithWildcard:
         assert api_main.CORS_ALLOW_CREDENTIALS is False
 
     def test_cors_middleware_registered_with_credentials_disabled(self):
-        matches = [
-            m for m in api_main.app.user_middleware if m.cls is CORSMiddleware
-        ]
+        matches = [m for m in api_main.app.user_middleware if m.cls is CORSMiddleware]
         assert len(matches) == 1
         assert matches[0].kwargs["allow_credentials"] is False
 
@@ -39,16 +37,17 @@ class TestRealAppDefaultsToNoCredentialsWithWildcard:
         client = TestClient(api_main.app)
         # Hit `/` (always 200) rather than `/health`, which is readiness and
         # returns 503 when the worker heartbeat is missing.
-        response = client.get(
-            "/", headers={"Origin": "https://evil.example.com"}
-        )
+        response = client.get("/", headers={"Origin": "https://evil.example.com"})
         assert response.status_code == 200
         assert "access-control-allow-credentials" not in {
             k.lower() for k in response.headers.keys()
         }
         # Still reflects the origin (wildcard-equivalent), just without
         # granting credentialed access.
-        assert response.headers.get("access-control-allow-origin") in ("*", "https://evil.example.com")
+        assert response.headers.get("access-control-allow-origin") in (
+            "*",
+            "https://evil.example.com",
+        )
 
 
 class TestExplicitWildcardAlsoDisablesCredentials:

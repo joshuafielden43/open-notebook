@@ -33,9 +33,7 @@ def _version_from_pyproject_text(text: str) -> str:
 
 
 def _raw_pyproject_url(owner: str, repo: str, branch: str) -> str:
-    return (
-        f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/pyproject.toml"
-    )
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/pyproject.toml"
 
 
 async def get_version_from_github_async(repo_url: str, branch: str = "main") -> str:

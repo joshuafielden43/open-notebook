@@ -39,6 +39,7 @@ def _vector_tables() -> tuple:
         return ("source_insight", "note")
     return VECTOR_TABLES
 
+
 # The KNN operator requires a literal candidate count at definition time
 # (a parameter is a parse error). 100 covers the search API's match_count
 # ceiling; LIMIT $match_count still applies after aggregation.

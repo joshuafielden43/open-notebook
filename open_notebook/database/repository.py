@@ -64,6 +64,7 @@ async def _ensure_pool() -> asyncio.Queue:
             _pool_disabled_logged = True
         return _pool
 
+
 # Bare SurrealDB table/relation identifier: no ':', whitespace, or query
 # syntax. Used to validate the parts of RELATE/UPSERT/UPDATE that name a
 # table or edge-relation and therefore can't be bound as a query parameter

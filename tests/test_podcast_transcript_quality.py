@@ -227,7 +227,9 @@ def test_derive_generation_stage_pipeline():
 
 
 @pytest.mark.asyncio
-async def test_quality_failure_is_repaired_once_without_human_intervention(tmp_path: Path):
+async def test_quality_failure_is_repaired_once_without_human_intervention(
+    tmp_path: Path,
+):
     import subprocess
 
     briefings = []
@@ -303,9 +305,7 @@ async def test_permanent_quality_failure_raises_after_two_attempts():
             await progress_callback("outline", OUTLINE)
             await progress_callback("transcript", _repetitive_transcript())
         raise TranscriptQualityError(
-            transcript_quality_issues(
-                briefing, OUTLINE, _repetitive_transcript()
-            )
+            transcript_quality_issues(briefing, OUTLINE, _repetitive_transcript())
         )
 
     with patch(

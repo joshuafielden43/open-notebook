@@ -547,7 +547,9 @@ class TestPodcastService:
         notebook = Notebook(id="notebook:test", name="Test", description="Test")
         submitted_args = {}
 
-        async def fake_submit_command(app_name, command_name, command_args, context=None):
+        async def fake_submit_command(
+            app_name, command_name, command_args, context=None
+        ):
             submitted_args.update(command_args)
             return "command:podcast"
 

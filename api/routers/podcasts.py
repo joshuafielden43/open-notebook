@@ -224,9 +224,7 @@ async def generate_podcast(request: PodcastGenerationRequest):
         )
         worker = await get_worker_status()
         worker_ready = bool(worker.get("worker_likely_ready", True))
-        message = (
-            f"Podcast generation started for episode '{request.episode_name}'"
-        )
+        message = f"Podcast generation started for episode '{request.episode_name}'"
         if not worker_ready:
             message = (
                 f"Podcast job queued for '{request.episode_name}', but the "
@@ -249,9 +247,7 @@ async def generate_podcast(request: PodcastGenerationRequest):
         raise
     except Exception as e:
         logger.error(f"Error generating podcast: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Failed to generate podcast"
-        )
+        raise HTTPException(status_code=500, detail="Failed to generate podcast")
 
 
 @router.get("/podcasts/jobs/{job_id}")
@@ -267,9 +263,7 @@ async def get_podcast_job_status(job_id: str):
         raise
     except Exception as e:
         logger.error(f"Error fetching podcast job status: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Failed to fetch job status"
-        )
+        raise HTTPException(status_code=500, detail="Failed to fetch job status")
 
 
 @router.get("/podcasts/episodes", response_model=List[PodcastEpisodeResponse])
@@ -363,9 +357,7 @@ async def list_podcast_episodes(
         raise
     except Exception as e:
         logger.error(f"Error listing podcast episodes: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Failed to list podcast episodes"
-        )
+        raise HTTPException(status_code=500, detail="Failed to list podcast episodes")
 
 
 @router.get("/podcasts/episodes/{episode_id}", response_model=PodcastEpisodeResponse)
@@ -456,7 +448,9 @@ async def stream_podcast_episode_audio(episode_id: str, download: bool = False):
     )
 
 
-def _extract_briefing_suffix(briefing: str, default_briefing: Optional[str]) -> Optional[str]:
+def _extract_briefing_suffix(
+    briefing: str, default_briefing: Optional[str]
+) -> Optional[str]:
     """Recover the one-off instructions appended after the profile default."""
     if not briefing:
         return None
@@ -511,9 +505,7 @@ async def retry_podcast_episode(episode_id: str):
         # CAS claim before submit so a double-click cannot enqueue two jobs
         # against the same artifact row while both still see the failed
         # command (#1608).
-        claimed = await PodcastEpisode.claim_for_retry(
-            episode_id, failed_command_id
-        )
+        claimed = await PodcastEpisode.claim_for_retry(episode_id, failed_command_id)
         if not claimed:
             raise HTTPException(
                 status_code=409,
@@ -534,9 +526,7 @@ async def retry_podcast_episode(episode_id: str):
         )
 
         if not ep_profile_name or not sp_profile_name:
-            await PodcastEpisode.restore_command_link(
-                episode_id, failed_command_id
-            )
+            await PodcastEpisode.restore_command_link(episode_id, failed_command_id)
             raise HTTPException(
                 status_code=400,
                 detail="Cannot retry: episode or speaker profile name missing from stored data",
@@ -556,14 +546,10 @@ async def retry_podcast_episode(episode_id: str):
                 existing_episode_id=episode_id,
             )
         except (HTTPException, OpenNotebookError):
-            await PodcastEpisode.restore_command_link(
-                episode_id, failed_command_id
-            )
+            await PodcastEpisode.restore_command_link(episode_id, failed_command_id)
             raise
         except Exception:
-            await PodcastEpisode.restore_command_link(
-                episode_id, failed_command_id
-            )
+            await PodcastEpisode.restore_command_link(episode_id, failed_command_id)
             raise
 
         return {
@@ -578,9 +564,7 @@ async def retry_podcast_episode(episode_id: str):
         raise
     except Exception as e:
         logger.error(f"Error retrying podcast episode: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Failed to retry episode"
-        )
+        raise HTTPException(status_code=500, detail="Failed to retry episode")
 
 
 @router.delete("/podcasts/episodes/{episode_id}")
@@ -605,6 +589,4 @@ async def delete_podcast_episode(episode_id: str):
         raise
     except Exception as e:
         logger.error(f"Error deleting podcast episode: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Failed to delete episode"
-        )
+        raise HTTPException(status_code=500, detail="Failed to delete episode")

@@ -152,7 +152,9 @@ async def fail_stale_running_commands(
         except Exception as row_err:
             logger.warning(f"Failed to mark command {row.get('id')} stale: {row_err}")
     if updated:
-        logger.warning(f"Marked {updated} stale running command(s) as failed (fallback)")
+        logger.warning(
+            f"Marked {updated} stale running command(s) as failed (fallback)"
+        )
     return updated
 
 

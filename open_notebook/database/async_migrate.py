@@ -31,9 +31,7 @@ def migration_file_lock() -> Iterator[None]:
         try:
             import fcntl
         except ImportError:
-            logger.warning(
-                "fcntl unavailable; migration lock is best-effort only"
-            )
+            logger.warning("fcntl unavailable; migration lock is best-effort only")
             yield
             return
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -141,60 +139,24 @@ class AsyncMigrationManager:
             AsyncMigration.from_file("open_notebook/database/migrations/8.surrealql"),
             AsyncMigration.from_file("open_notebook/database/migrations/9.surrealql"),
             AsyncMigration.from_file("open_notebook/database/migrations/10.surrealql"),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/11.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/12.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/13.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/14.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/15.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/16.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/17.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/18.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/19.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/20.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/21.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/22.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/23.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/24.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/25.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/26.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/27.surrealql"
-            ),
-            AsyncMigration.from_file(
-                "open_notebook/database/migrations/28.surrealql"
-            ),
+            AsyncMigration.from_file("open_notebook/database/migrations/11.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/12.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/13.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/14.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/15.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/16.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/17.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/18.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/19.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/20.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/21.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/22.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/23.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/24.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/25.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/26.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/27.surrealql"),
+            AsyncMigration.from_file("open_notebook/database/migrations/28.surrealql"),
         ]
         self.down_migrations = [
             AsyncMigration.from_file(
@@ -315,9 +277,7 @@ class AsyncMigrationManager:
                 try:
                     await self.runner.run_all()
                     new_version = await self.get_current_version()
-                    logger.info(
-                        f"Migration successful. New version: {new_version}"
-                    )
+                    logger.info(f"Migration successful. New version: {new_version}")
                 except Exception as e:
                     logger.error(f"Migration failed: {str(e)}")
                     raise

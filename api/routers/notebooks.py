@@ -61,9 +61,7 @@ async def get_notebooks(
 ):
     """Get all notebooks with optional filtering and ordering."""
     try:
-        result = await list_notebooks_with_counts(
-            archived=archived, order_by=order_by
-        )
+        result = await list_notebooks_with_counts(archived=archived, order_by=order_by)
         return [
             NotebookResponse(
                 id=str(nb.get("id", "")),
@@ -85,9 +83,7 @@ async def get_notebooks(
         raise
     except Exception as e:
         logger.error(f"Error fetching notebooks: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error fetching notebooks"
-        )
+        raise HTTPException(status_code=500, detail="Error fetching notebooks")
 
 
 @router.post("/notebooks", response_model=NotebookResponse)
@@ -118,9 +114,7 @@ async def create_notebook(notebook: NotebookCreate):
         raise
     except Exception as e:
         logger.error(f"Error creating notebook: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error creating notebook"
-        )
+        raise HTTPException(status_code=500, detail="Error creating notebook")
 
 
 @router.get("/recently-viewed", response_model=List[RecentlyViewedResponse])
@@ -206,9 +200,7 @@ async def get_notebook(notebook_id: str):
         raise
     except Exception as e:
         logger.error(f"Error fetching notebook {notebook_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error fetching notebook"
-        )
+        raise HTTPException(status_code=500, detail="Error fetching notebook")
 
 
 @router.put("/notebooks/{notebook_id}", response_model=NotebookResponse)
@@ -270,9 +262,7 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
         raise
     except Exception as e:
         logger.error(f"Error updating notebook {notebook_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error updating notebook"
-        )
+        raise HTTPException(status_code=500, detail="Error updating notebook")
 
 
 @router.post("/notebooks/{notebook_id}/sources/{source_id}")
@@ -313,9 +303,7 @@ async def add_source_to_notebook(notebook_id: str, source_id: str):
         logger.error(
             f"Error linking source {source_id} to notebook {notebook_id}: {str(e)}"
         )
-        raise HTTPException(
-            status_code=500, detail="Error linking source to notebook"
-        )
+        raise HTTPException(status_code=500, detail="Error linking source to notebook")
 
 
 @router.delete("/notebooks/{notebook_id}/sources/{source_id}")
@@ -387,6 +375,4 @@ async def delete_notebook(
         raise
     except Exception as e:
         logger.error(f"Error deleting notebook {notebook_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error deleting notebook"
-        )
+        raise HTTPException(status_code=500, detail="Error deleting notebook")

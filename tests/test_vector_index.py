@@ -82,7 +82,9 @@ async def test_uniform_dimension_defines_indexes_and_knn_function():
 @pytest.mark.asyncio
 async def test_matching_existing_index_is_not_redefined():
     defs = {
-        t: {f"idx_{t}_vec": f"DEFINE INDEX idx_{t}_vec ON {t} FIELDS embedding MTREE DIMENSION 768 DIST COSINE"}
+        t: {
+            f"idx_{t}_vec": f"DEFINE INDEX idx_{t}_vec ON {t} FIELDS embedding MTREE DIMENSION 768 DIST COSINE"
+        }
         for t in ("source_embedding", "source_insight", "note")
     }
     fake = FakeRepo(dims_by_table={"source_embedding": [768]}, index_defs=defs)
@@ -106,7 +108,9 @@ async def test_dimension_change_removes_then_redefines():
     removes = [q for q in fake.queries if q.startswith("REMOVE INDEX")]
     assert len(removes) == 1 and "source_embedding" in removes[0]
     assert any(
-        q.startswith("DEFINE INDEX") and "source_embedding" in q and "DIMENSION 768" in q
+        q.startswith("DEFINE INDEX")
+        and "source_embedding" in q
+        and "DIMENSION 768" in q
         for q in fake.queries
     )
 

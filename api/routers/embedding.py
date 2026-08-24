@@ -65,9 +65,7 @@ async def embed_content(embed_request: EmbedRequest):
 
             except Exception as e:
                 logger.error(f"Failed to submit async embedding command: {e}")
-                raise HTTPException(
-                    status_code=500, detail="Failed to queue embedding"
-                )
+                raise HTTPException(status_code=500, detail="Failed to queue embedding")
 
         else:
             # DOMAIN MODEL PATH: Submit job via domain model convenience methods
@@ -121,6 +119,4 @@ async def embed_content(embed_request: EmbedRequest):
         logger.error(
             f"Error embedding {embed_request.item_type} {embed_request.item_id}: {str(e)}"
         )
-        raise HTTPException(
-            status_code=500, detail="Error embedding content"
-        )
+        raise HTTPException(status_code=500, detail="Error embedding content")

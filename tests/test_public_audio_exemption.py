@@ -37,15 +37,13 @@ class TestPublicAudioFlag:
             is False
         )
         # Sub-paths beyond /audio stay guarded
-        assert (
-            is_public_audio_request("GET", AUDIO_PATH + "/extra") is False
-        )
+        assert is_public_audio_request("GET", AUDIO_PATH + "/extra") is False
 
 
 class TestDownloadFilename:
     def test_sanitizes_episode_name(self):
         assert (
-            _episode_download_filename("My Episode: The \"Best\" One?", "e:1")
+            _episode_download_filename('My Episode: The "Best" One?', "e:1")
             == "My Episode The Best One.mp3"
         )
 

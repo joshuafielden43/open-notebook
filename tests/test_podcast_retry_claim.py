@@ -17,12 +17,8 @@ async def test_claim_for_retry_wins_when_command_matches():
         assert "id" in vars and "expected" in vars
         return [{"id": "episode:abc", "command": None}]
 
-    with patch(
-        "open_notebook.podcasts.models.repo_query", new=fake_repo
-    ):
-        assert await PodcastEpisode.claim_for_retry(
-            "episode:abc", "command:failed1"
-        )
+    with patch("open_notebook.podcasts.models.repo_query", new=fake_repo):
+        assert await PodcastEpisode.claim_for_retry("episode:abc", "command:failed1")
 
 
 @pytest.mark.asyncio
@@ -31,9 +27,7 @@ async def test_claim_for_retry_loses_when_already_claimed():
         # Surreal returns empty when WHERE does not match.
         return []
 
-    with patch(
-        "open_notebook.podcasts.models.repo_query", new=fake_repo
-    ):
+    with patch("open_notebook.podcasts.models.repo_query", new=fake_repo):
         assert not await PodcastEpisode.claim_for_retry(
             "episode:abc", "command:failed1"
         )
@@ -55,12 +49,8 @@ async def test_restore_command_link_only_when_none():
         assert "command" in vars
         return []
 
-    with patch(
-        "open_notebook.podcasts.models.repo_query", new=fake_repo
-    ):
-        await PodcastEpisode.restore_command_link(
-            "episode:abc", "command:failed1"
-        )
+    with patch("open_notebook.podcasts.models.repo_query", new=fake_repo):
+        await PodcastEpisode.restore_command_link("episode:abc", "command:failed1")
 
     assert calls
     assert "WHERE command IS NONE" in calls[0]
@@ -102,9 +92,7 @@ async def test_retry_endpoint_second_claim_returns_409():
             "open_notebook.database.repository.repo_query",
             new=AsyncMock(return_value=[{"status": "failed"}]),
         ),
-        patch.object(
-            PodcastEpisode, "claim_for_retry", new=fake_claim
-        ),
+        patch.object(PodcastEpisode, "claim_for_retry", new=fake_claim),
         patch.object(
             podcasts_router.PodcastService,
             "submit_generation_job",
@@ -155,15 +143,11 @@ async def test_retry_endpoint_restores_command_when_submit_fails():
         patch.object(
             PodcastEpisode, "claim_for_retry", new=AsyncMock(return_value=True)
         ),
-        patch.object(
-            PodcastEpisode, "restore_command_link", new=restore
-        ),
+        patch.object(PodcastEpisode, "restore_command_link", new=restore),
         patch.object(
             podcasts_router.PodcastService,
             "submit_generation_job",
-            new=AsyncMock(
-                side_effect=HTTPException(status_code=400, detail="nope")
-            ),
+            new=AsyncMock(side_effect=HTTPException(status_code=400, detail="nope")),
         ),
     ):
         with pytest.raises(HTTPException) as ei:

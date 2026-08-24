@@ -73,7 +73,9 @@ class EpisodeGenerationResult:
     processing_time: float
 
 
-def build_episode_output_dir(podcasts_folder: str = PODCASTS_FOLDER) -> tuple[str, Path]:
+def build_episode_output_dir(
+    podcasts_folder: str = PODCASTS_FOLDER,
+) -> tuple[str, Path]:
     """Build a filesystem-safe output directory under PODCASTS_FOLDER/episodes."""
     import uuid
 
@@ -173,9 +175,7 @@ async def run_episode_generation(
     output_dir: Optional[Path] = None
 
     try:
-        logger.info(
-            f"Starting podcast generation for episode: {request.episode_name}"
-        )
+        logger.info(f"Starting podcast generation for episode: {request.episode_name}")
         logger.info(f"Using episode profile: {request.episode_profile}")
 
         episode_profile, speaker_profile = await load_profiles_for_job(
@@ -186,15 +186,21 @@ async def run_episode_generation(
         logger.info(f"Loaded episode profile: {episode_profile.name}")
         logger.info(f"Loaded speaker profile: {speaker_profile.name}")
 
-        outline_provider, outline_model_name, outline_config = (
-            await episode_profile.resolve_outline_config()
-        )
-        transcript_provider, transcript_model_name, transcript_config = (
-            await episode_profile.resolve_transcript_config()
-        )
-        tts_provider, tts_model_name, tts_config = (
-            await speaker_profile.resolve_tts_config()
-        )
+        (
+            outline_provider,
+            outline_model_name,
+            outline_config,
+        ) = await episode_profile.resolve_outline_config()
+        (
+            transcript_provider,
+            transcript_model_name,
+            transcript_config,
+        ) = await episode_profile.resolve_transcript_config()
+        (
+            tts_provider,
+            tts_model_name,
+            tts_config,
+        ) = await speaker_profile.resolve_tts_config()
 
         logger.info(
             f"Resolved models - outline: {outline_provider}/{outline_model_name}, "

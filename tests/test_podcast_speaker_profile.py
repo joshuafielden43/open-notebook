@@ -108,9 +108,7 @@ class TestSpeakerProfileResolution:
             ),
             patch.object(SpeakerProfile, "resolve", new=speaker_resolve),
         ):
-            with pytest.raises(
-                ValueError, match="has no speaker profile configured"
-            ):
+            with pytest.raises(ValueError, match="has no speaker profile configured"):
                 await generate_podcast_command(make_input(speaker_profile=None))
 
         speaker_resolve.assert_not_awaited()
@@ -422,8 +420,7 @@ class TestOrphanedProfileDoesNotPoisonConfig:
         # Only the job's profile is configured — orphans never enter the map.
         assert list(episode_config.keys()) == ["Test Episode Profile"]
         assert (
-            episode_config["Test Episode Profile"]["speaker_config"]
-            == "Tech Experts"
+            episode_config["Test Episode Profile"]["speaker_config"] == "Tech Experts"
         )
         speaker_config = configure_calls["speakers_config"]["profiles"]
         assert list(speaker_config.keys()) == ["Tech Experts"]

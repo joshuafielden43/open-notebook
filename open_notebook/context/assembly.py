@@ -1,10 +1,11 @@
-"""Context assembly — single module for chat, source-chat, and podcast.
+"""Context assembly — single module for chat, source-chat, podcast, and report.
 
 Purpose-specific entry points:
 
 - :func:`for_chat` / :func:`build_notebook_context` — notebook chat inclusion config
 - :func:`for_source_chat` / :func:`build_source_context` — one source + insights
 - :func:`for_podcast` — long-form char-budgeted string for podcast generation
+- :func:`for_report` — long-form token-budgeted string for report generation
 
 Domain models expose only field getters; orchestration lives here.
 """
@@ -29,6 +30,11 @@ from open_notebook.utils.token_utils import token_count
 
 # Default notebook-chat context budget (tokens). 0 = unlimited.
 DEFAULT_CHAT_CONTEXT_MAX_TOKENS = 100_000
+# Report generation: token-native budget (not char packing). 0 = unlimited.
+DEFAULT_REPORT_CONTEXT_MAX_TOKENS = 80_000
+# Sentinel so for_report(max_tokens=None) means unlimited, while omitting
+# max_tokens means "use OPEN_NOTEBOOK_REPORT_CONTEXT_MAX_TOKENS".
+_REPORT_BUDGET_UNSET: object = object()
 
 # Source-chat budgeting (ported from upstream a7de90d, #1226).
 SOURCE_TRUNCATION_NOTICE = (
@@ -49,6 +55,21 @@ def chat_context_max_tokens() -> Optional[int]:
         value = int(raw)
     except ValueError:
         return DEFAULT_CHAT_CONTEXT_MAX_TOKENS
+    if value <= 0:
+        return None
+    return value
+
+
+def report_context_max_tokens() -> Optional[int]:
+    """Token budget for for_report; None means unlimited."""
+    raw = os.getenv(
+        "OPEN_NOTEBOOK_REPORT_CONTEXT_MAX_TOKENS",
+        str(DEFAULT_REPORT_CONTEXT_MAX_TOKENS),
+    )
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_REPORT_CONTEXT_MAX_TOKENS
     if value <= 0:
         return None
     return value
@@ -723,6 +744,54 @@ def _format_note_long_block(note: Note, note_context: Any) -> Optional[str]:
     return f"## Note: {title}\n\n{content}"
 
 
+def _pack_blocks_by_tokens(
+    blocks: List[str],
+    max_tokens: Optional[int],
+) -> str:
+    """Greedily pack whole blocks under a token budget."""
+    if not blocks:
+        return ""
+    if max_tokens is None:
+        return "\n\n".join(blocks)
+
+    packed: List[str] = []
+    used = 0
+    separator = "\n\n"
+    separator_tokens = token_count(separator)
+
+    for block in blocks:
+        cost = token_count(block)
+        extra = separator_tokens if packed else 0
+        if used + extra + cost <= max_tokens:
+            packed.append(block)
+            used += extra + cost
+            continue
+        if packed:
+            break
+
+        # The first block alone is too large. Truncate to an approximate fit,
+        # then tighten until the rendered block is actually under budget.
+        approximate_chars = max(64, max_tokens * 3)
+        truncated = block[:approximate_chars].rstrip()
+        marker = (
+            f"\n\n[context truncated: first block alone exceeded "
+            f"token budget ~{max_tokens}]"
+        )
+        while truncated and token_count(truncated + marker) > max_tokens:
+            truncated = truncated[: max(0, len(truncated) // 2)].rstrip()
+            if len(truncated) < 64:
+                break
+        packed.append(truncated + marker)
+        break
+
+    if len(packed) < len(blocks):
+        logger.warning(
+            f"Report context packed {len(packed)}/{len(blocks)} block(s) "
+            f"under ~{max_tokens} tokens"
+        )
+    return "\n\n".join(packed)
+
+
 def _pack_blocks_by_chars(
     blocks: List[str],
     max_chars: Optional[int],
@@ -779,8 +848,9 @@ async def _collect_long_form_blocks(
 ) -> List[str]:
     """Load full sources/notes once and format long-form blocks (#1630).
 
-    Budget packing happens after collection. ``skip_item_errors`` controls
-    whether malformed individual items are omitted or propagated.
+    Shared by podcast and report generation. Budget packing happens after
+    collection. ``skip_item_errors`` controls whether malformed individual
+    items are omitted or propagated.
     """
     sources = await notebook.get_sources(include_full_text=True)
     notes = await notebook.get_notes(include_content=True)
@@ -840,3 +910,23 @@ async def for_podcast(
     """
     blocks = await _collect_long_form_blocks(notebook, skip_item_errors=False)
     return _pack_blocks_by_chars(blocks, max_chars)
+
+
+async def for_report(
+    notebook: Notebook,
+    max_tokens: Any = _REPORT_BUDGET_UNSET,
+) -> str:
+    """Long-form notebook context for report generation.
+
+    The default token budget comes from
+    ``OPEN_NOTEBOOK_REPORT_CONTEXT_MAX_TOKENS`` (80,000; ``0`` means
+    unlimited). Passing ``max_tokens=None`` explicitly also means unlimited.
+    """
+    budget: Optional[int]
+    if max_tokens is _REPORT_BUDGET_UNSET:
+        budget = report_context_max_tokens()
+    else:
+        budget = max_tokens  # type: ignore[assignment]
+
+    blocks = await _collect_long_form_blocks(notebook, skip_item_errors=True)
+    return _pack_blocks_by_tokens(blocks, budget)

@@ -1,0 +1,64 @@
+You write a structured markdown research report from the notebook material below.
+
+## Evidence is the budget
+
+The assembled context is your only evidence supply. Treat concrete material
+(names, numbers, quoted language, code identifiers, timestamps, file paths,
+explicit claims tied to a source block) as a finite resource you spend as
+you write.
+
+- Every body section must be built on specifics drawn from the context.
+  Prefer short, dense sections that carry those specifics over long
+  sections that restate themes without new evidence.
+- Do not open a section you cannot stock with at least one concrete token
+  from the context (a number, a named entity that appears in the material,
+  a quoted phrase, or a code/identifier). If you cannot stock it, omit it.
+- Front-loading all the evidence into early sections and then padding later
+  ones with generic prose is a failure mode — avoid it. Spread remaining
+  unused specifics across the sections you do write, or write fewer sections.
+- When the unused evidence runs thin, stop writing body sections. A short
+  report that stays grounded is correct; a long report that drifts into
+  summary language is not. Section count is not a goal.
+- Do not invent facts, numbers, quotes, or sources. Do not paraphrase the
+  same claim across multiple sections to fill space.
+
+## Output contract (mandatory)
+
+1. Start with exactly one top-level `#` title line.
+2. Organize the body with `##` section headings — only as many as the
+   remaining evidence supports. There is no target section count.
+3. End with a final section headed exactly `## Sources`.
+4. Under `## Sources`, list the titles of the sources you actually used
+   (bullet list). Prefer the known source titles when provided.
+
+Do not wrap the report in code fences. Write in clear, neutral prose.
+
+## Notebook
+
+Name: {{ notebook_name }}
+
+## Context
+
+The following material was assembled from the notebook (sources and notes).
+Source blocks are headed `## Source: <title>`.
+
+<context>
+{{ context }}
+</context>
+
+{% if source_titles %}
+## Known source titles in the assembled context
+
+{% for title in source_titles -%}
+- {{ title }}
+{% endfor %}
+{% endif %}
+{% if instructions %}
+
+## Additional instructions from the user
+
+Follow these instructions verbatim (they do not override the evidence budget
+above — still stop when the material runs thin):
+
+{{ instructions }}
+{% endif %}

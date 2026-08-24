@@ -59,6 +59,10 @@ Comprehensive list of all environment variables available in Open Notebook.
 
 | Variable | Required? | Default | Description |
 |----------|-----------|---------|-------------|
+| `OPEN_NOTEBOOK_REPORT_CONTEXT_MAX_TOKENS` | No | 80000 | Maximum token budget for standard report context assembly. Set to `0` for unlimited. |
+
+| Variable | Required? | Default | Description |
+|----------|-----------|---------|-------------|
 | `ESPERANTO_LLM_TIMEOUT` | No | 60 | LLM inference timeout in seconds |
 | `ESPERANTO_SSL_VERIFY` | No | true | Verify SSL certificates (false = development only) |
 | `ESPERANTO_SSL_CA_BUNDLE` | No | None | Path to custom CA certificate bundle |

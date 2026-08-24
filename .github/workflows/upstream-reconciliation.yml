@@ -1,4 +1,4 @@
-name: Private Upstream Reconciliation
+name: Upstream Reconciliation
 
 on:
   schedule:
@@ -8,51 +8,53 @@ on:
       timezone: America/Los_Angeles
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
-  group: private-upstream-reconciliation
+  group: upstream-reconciliation
   cancel-in-progress: false
 
 jobs:
   reconcile:
-    name: Reconcile and validate private install
+    name: Reconcile and validate public install
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
     env:
       UPSTREAM_URL: https://github.com/lfnovo/open-notebook.git
 
     steps:
-      - name: Checkout private install branch
+      - name: Checkout maintained install branch
         uses: actions/checkout@v6
         with:
           ref: install
           fetch-depth: 0
 
-      - name: Verify private standalone boundary
+      - name: Verify public standalone boundary
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "${GITHUB_REPOSITORY}" = "joshuafielden43/open-notebook"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.private')" = "true"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.visibility')" = "public"
           test "$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.fork')" = "false"
 
-      - name: Fetch private and upstream branches
+      - name: Fetch maintained and upstream branches
         run: |
           set -euo pipefail
           git remote add upstream "${UPSTREAM_URL}"
+          git remote set-url --push upstream DISABLED://read-only-upstream
+          test "$(git remote get-url --push upstream)" = "DISABLED://read-only-upstream"
           git fetch --prune origin main install
           git fetch --prune upstream main
 
-      - name: Fast-forward private main mirror
+      - name: Fast-forward maintained main mirror
         run: |
           set -euo pipefail
           if git merge-base --is-ancestor origin/main upstream/main; then
             git push origin upstream/main:main
           else
-            echo "::error::private/main diverged from upstream/main; refusing to rewrite it"
+            echo "::error::maintained main diverged from upstream/main; refusing to rewrite it"
             git rev-list --left-right --count origin/main...upstream/main
             exit 1
           fi
@@ -66,7 +68,7 @@ jobs:
             echo "changed=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          git config user.name "Open Notebook private sync"
+          git config user.name "Open Notebook upstream sync"
           git config user.email "actions@users.noreply.github.com"
           git merge --no-ff --no-edit upstream/main
           echo "changed=true" >> "${GITHUB_OUTPUT}"
@@ -126,9 +128,58 @@ jobs:
       - name: Reconciliation receipt
         run: |
           {
-            echo "### Private upstream reconciliation"
+            echo "### Upstream reconciliation"
             echo "- upstream/main: $(git rev-parse upstream/main)"
-            echo "- private/main: $(git rev-parse origin/main)"
-            echo "- private/install: $(git rev-parse origin/install)"
+            echo "- maintained main: $(git rev-parse origin/main)"
+            echo "- maintained install: $(git rev-parse origin/install)"
             echo "- install changed: ${{ steps.merge.outputs.changed }}"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Close resolved failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILURE_TITLE: Automated upstream reconciliation is failing
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --state open \
+            --search "${FAILURE_TITLE} in:title" \
+            --json number,title \
+            --jq ".[] | select(.title == \"${FAILURE_TITLE}\") | .number" \
+            | head -n 1)"
+          if [ -n "${existing}" ]; then
+            gh issue close "${existing}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --comment "Daily upstream reconciliation is healthy again."
+          fi
+
+  notify-failure:
+    name: Record reconciliation failure
+    needs: reconcile
+    if: ${{ always() && needs.reconcile.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Create or update failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILURE_TITLE: Automated upstream reconciliation is failing
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --state open \
+            --search "${FAILURE_TITLE} in:title" \
+            --json number,title \
+            --jq ".[] | select(.title == \"${FAILURE_TITLE}\") | .number" \
+            | head -n 1)"
+          body="Daily upstream reconciliation failed: ${RUN_URL}"
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --repo "${GITHUB_REPOSITORY}" --body "${body}"
+          else
+            gh issue create --repo "${GITHUB_REPOSITORY}" --title "${FAILURE_TITLE}" --body "${body}"
+          fi

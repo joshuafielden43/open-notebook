@@ -1,8 +1,8 @@
 # open_notebook_fork backlog (owned)
 
-Project: Vikunja `open_notebook_fork` (id 50).  
-Branch: `codex/podcast-schema-integration`.  
-Posture: [PDR-003](decisions/PDR-003-fork-install-posture.md) — this fork is an install.
+Project: Vikunja `open_notebook_fork` (id 50).
+Maintained branch: `install`.
+Posture: [PDR-003](decisions/PDR-003-fork-install-posture.md) — this fork is an install; [PDR-004](decisions/PDR-004-public-maintained-install.md) — it is public and upstream is read-only.
 
 ## Execution order
 

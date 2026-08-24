@@ -1,5 +1,13 @@
 <a id="readme-top"></a>
 
+> [!NOTE]
+> This is Joshua Fielden's public, maintained Open Notebook installation. It is
+> derived from [lfnovo/open-notebook](https://github.com/lfnovo/open-notebook),
+> preserves attribution and the MIT license, and carries installation-specific
+> changes. A daily workflow fetches upstream and integrates it into this
+> repository's `install` branch after validation. It never pushes to, opens pull
+> requests against, or otherwise writes to the upstream project.
+
 <!-- [![Contributors][contributors-shield]][contributors-url] -->
 [![Forks][forks-shield]][forks-url]
 [![Stargazers][stars-shield]][stars-url]

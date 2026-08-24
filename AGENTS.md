@@ -28,6 +28,7 @@ Or all at once: `make start-all` (status: `make status`, stop: `make stop-all`).
 
 - **Async-first**: every DB query, graph invocation and AI call is `await`-ed. No sync DB access.
 - **Never commit secrets.** Credentials are encrypted at rest and require `OPEN_NOTEBOOK_ENCRYPTION_KEY` to be set.
+- **Public maintained-install boundary:** assume every committed file and CI log is public. Upstream is fetch-only: never push to it, open an upstream issue or pull request, or contact its maintainers unless Joshua explicitly authorizes that separate action.
 - CORS is wide-open and auth is a simple password middleware — **dev defaults, not production hardening**. Don't build features that assume otherwise.
 - Product direction questions (does this feature fit?) → [VISION.md](VISION.md). Past decisions ("why is it like this?") → [docs/7-DEVELOPMENT/decisions/](docs/7-DEVELOPMENT/decisions/). Structural decisions made while coding should produce a new decision record there.
 

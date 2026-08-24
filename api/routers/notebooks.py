@@ -11,6 +11,12 @@ from api.models import (
     NotebookUpdate,
     RecentlyViewedResponse,
 )
+from open_notebook.application.notebooks import (
+    get_notebook_row_with_counts,
+    list_notebooks_with_counts,
+    list_recently_viewed_rows,
+    stamp_notebook_view,
+)
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Notebook, Source
 from open_notebook.exceptions import (
@@ -27,17 +33,7 @@ def _last_viewed_sort_key(item: RecentlyViewedResponse) -> str:
 
 
 async def _stamp_notebook_view(notebook_id: str) -> None:
-    # Best-effort write-on-read: recording the view timestamp must never turn a
-    # successful read into a 500. Log and move on if the stamp update fails.
-    try:
-        await repo_query(
-            "UPDATE $notebook_id SET last_viewed_at = time::now();",
-            {"notebook_id": ensure_record_id(notebook_id)},
-        )
-    except Exception as e:
-        logger.warning(
-            f"Failed to stamp last_viewed_at for notebook {notebook_id}: {e}"
-        )
+    await stamp_notebook_view(notebook_id)
 
 
 def _recently_viewed_notebook(row: dict) -> RecentlyViewedResponse:
@@ -65,46 +61,9 @@ async def get_notebooks(
 ):
     """Get all notebooks with optional filtering and ordering."""
     try:
-        # Validate order_by against allowlist to prevent SurrealQL injection
-        allowed_fields = {"name", "created", "updated"}
-        allowed_directions = {"asc", "desc"}
-
-        parts = order_by.strip().lower().split()
-        if len(parts) == 1:
-            if parts[0] not in allowed_fields:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid order_by field: '{order_by}'. Allowed fields: {', '.join(sorted(allowed_fields))}",
-                )
-            validated_order_by = parts[0]
-        elif len(parts) == 2:
-            if parts[0] not in allowed_fields or parts[1] not in allowed_directions:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid order_by: '{order_by}'. Allowed fields: {', '.join(sorted(allowed_fields))}. Allowed directions: asc, desc",
-                )
-            validated_order_by = f"{parts[0]} {parts[1]}"
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid order_by format: '{order_by}'. Expected 'field' or 'field direction'",
-            )
-
-        # Build the query with counts
-        query = f"""
-            SELECT *,
-            count(<-reference.in) as source_count,
-            count(<-artifact.in) as note_count
-            FROM notebook
-            ORDER BY {validated_order_by}
-        """
-
-        result = await repo_query(query)
-
-        # Filter by archived status if specified
-        if archived is not None:
-            result = [nb for nb in result if nb.get("archived") == archived]
-
+        result = await list_notebooks_with_counts(
+            archived=archived, order_by=order_by
+        )
         return [
             NotebookResponse(
                 id=str(nb.get("id", "")),
@@ -118,6 +77,8 @@ async def get_notebooks(
             )
             for nb in result
         ]
+    except InvalidInputError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except OpenNotebookError:
@@ -125,7 +86,7 @@ async def get_notebooks(
     except Exception as e:
         logger.error(f"Error fetching notebooks: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error fetching notebooks: {str(e)}"
+            status_code=500, detail="Error fetching notebooks"
         )
 
 
@@ -158,7 +119,7 @@ async def create_notebook(notebook: NotebookCreate):
     except Exception as e:
         logger.error(f"Error creating notebook: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error creating notebook: {str(e)}"
+            status_code=500, detail="Error creating notebook"
         )
 
 
@@ -168,27 +129,7 @@ async def get_recently_viewed(
 ):
     """Get recently viewed notebooks and sources, newest first."""
     try:
-        notebooks = await repo_query(
-            """
-            SELECT id, name AS title, last_viewed_at
-            FROM notebook
-            WHERE last_viewed_at != NONE AND last_viewed_at != NULL
-            ORDER BY last_viewed_at DESC
-            LIMIT $limit
-            """,
-            {"limit": limit},
-        )
-        sources = await repo_query(
-            """
-            SELECT id, title, last_viewed_at
-            FROM source
-            WHERE last_viewed_at != NONE AND last_viewed_at != NULL
-            ORDER BY last_viewed_at DESC
-            LIMIT $limit
-            """,
-            {"limit": limit},
-        )
-
+        notebooks, sources = await list_recently_viewed_rows(limit)
         items = [
             *[_recently_viewed_notebook(nb) for nb in notebooks],
             *[_recently_viewed_source(src) for src in sources],
@@ -235,7 +176,7 @@ async def get_notebook_delete_preview(notebook_id: str):
         logger.error(f"Error getting delete preview for notebook {notebook_id}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error fetching notebook deletion preview: {str(e)}",
+            detail="Error fetching notebook deletion preview",
         )
 
 
@@ -243,21 +184,12 @@ async def get_notebook_delete_preview(notebook_id: str):
 async def get_notebook(notebook_id: str):
     """Get a specific notebook by ID."""
     try:
-        # Query with counts for single notebook
-        query = """
-            SELECT *,
-            count(<-reference.in) as source_count,
-            count(<-artifact.in) as note_count
-            FROM $notebook_id
-        """
-        result = await repo_query(query, {"notebook_id": ensure_record_id(notebook_id)})
-
-        if not result:
+        nb = await get_notebook_row_with_counts(notebook_id)
+        if not nb:
             raise HTTPException(status_code=404, detail="Notebook not found")
 
         await _stamp_notebook_view(notebook_id)
 
-        nb = result[0]
         return NotebookResponse(
             id=str(nb.get("id", "")),
             name=nb.get("name", ""),
@@ -275,7 +207,7 @@ async def get_notebook(notebook_id: str):
     except Exception as e:
         logger.error(f"Error fetching notebook {notebook_id}: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error fetching notebook: {str(e)}"
+            status_code=500, detail="Error fetching notebook"
         )
 
 
@@ -339,7 +271,7 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
     except Exception as e:
         logger.error(f"Error updating notebook {notebook_id}: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error updating notebook: {str(e)}"
+            status_code=500, detail="Error updating notebook"
         )
 
 
@@ -382,7 +314,7 @@ async def add_source_to_notebook(notebook_id: str, source_id: str):
             f"Error linking source {source_id} to notebook {notebook_id}: {str(e)}"
         )
         raise HTTPException(
-            status_code=500, detail=f"Error linking source to notebook: {str(e)}"
+            status_code=500, detail="Error linking source to notebook"
         )
 
 
@@ -414,7 +346,7 @@ async def remove_source_from_notebook(notebook_id: str, source_id: str):
             f"Error removing source {source_id} from notebook {notebook_id}: {str(e)}"
         )
         raise HTTPException(
-            status_code=500, detail=f"Error removing source from notebook: {str(e)}"
+            status_code=500, detail="Error removing source from notebook"
         )
 
 
@@ -456,5 +388,5 @@ async def delete_notebook(
     except Exception as e:
         logger.error(f"Error deleting notebook {notebook_id}: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error deleting notebook: {str(e)}"
+            status_code=500, detail="Error deleting notebook"
         )

@@ -1,4 +1,3 @@
-import os
 from typing import Any, ClassVar, Dict, Optional, Sequence, Union
 
 from esperanto import (
@@ -11,7 +10,6 @@ from esperanto import (
 from loguru import logger
 from surrealdb import RecordID
 
-from open_notebook.ai.connection_tester import normalize_anthropic_compatible_base_url
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.base import ObjectModel, RecordModel
 from open_notebook.exceptions import ConfigurationError
@@ -175,7 +173,12 @@ class ModelManager:
         pass  # No caching needed
 
     async def get_model(self, model_id: str, **kwargs) -> Optional[ModelType]:
-        """Get a model by ID. Esperanto will cache the actual model instance."""
+        """Get a model by ID. Esperanto will cache the actual model instance.
+
+        Config resolution (credential, URL revalidation, anthropic normalize)
+        is shared with :func:`open_notebook.ai.runtime.resolve_model_config`
+        so non-Esperanto and Esperanto call sites cannot diverge (#1629).
+        """
         if not model_id:
             return None
 
@@ -192,92 +195,41 @@ class ModelManager:
         ]:
             raise ConfigurationError(f"Invalid model type: {model.type}")
 
-        # Build config from credential if linked, otherwise fall back to env vars
-        config: dict = {}
-        if model.credential:
-            credential = await model.get_credential_obj()
-            if credential:
-                config = credential.to_esperanto_config()
-                await _revalidate_config_urls(config, model.provider)
-                logger.debug(
-                    f"Using credential '{credential.name}' for model {model.name}"
-                )
-            else:
-                logger.warning(
-                    f"Model {model.id} has credential {model.credential} but it could not be loaded. "
-                    f"Falling back to env vars."
-                )
-                # Fall back to env var provisioning
-                from open_notebook.ai.key_provider import provision_provider_keys
+        from open_notebook.ai.runtime import resolve_model_config
 
-                await provision_provider_keys(model.provider)
-        else:
-            # No credential linked - use env var fallback
-            from open_notebook.ai.key_provider import provision_provider_keys
-
-            await provision_provider_keys(model.provider)
-
-        # anthropic_compatible: esperanto has no such provider name; it maps to
-        # the anthropic provider with a custom base_url. Pull config from env when
-        # no credential is linked. This runs BEFORE kwargs are merged so that a
-        # kwarg like temperature does not make `config` truthy and suppress the
-        # env-var fallback for an unlinked model.
-        if model.provider == "anthropic_compatible" and not config:
-            api_key = os.environ.get("ANTHROPIC_COMPATIBLE_API_KEY")
-            base_url = os.environ.get("ANTHROPIC_COMPATIBLE_BASE_URL")
-            if api_key:
-                config["api_key"] = api_key
-            if base_url:
-                config["base_url"] = base_url
-                # A base_url from a provisioned DB credential needs the same
-                # request-time re-validation the credential-linked path gets.
-                await _revalidate_config_urls(config, model.provider)
-
-        # Merge any additional kwargs (e.g. temperature)
-        config.update(kwargs)
-
-        # Require base_url + api_key and normalize the URL for anthropic_compatible.
-        if model.provider == "anthropic_compatible" and (
-            not str(config.get("api_key", "")).strip()
-            or not str(config.get("base_url", "")).strip()
-        ):
-            raise ConfigurationError(
-                "Anthropic-compatible models require a base URL and API key"
-            )
-        if model.provider == "anthropic_compatible":
-            config["base_url"] = normalize_anthropic_compatible_base_url(
-                str(config["base_url"])
-            )
+        stored_provider, model_name, config = await resolve_model_config(
+            model_id, **kwargs
+        )
 
         # Normalize provider name: DB stores underscores but Esperanto expects hyphens
         provider = (
             "anthropic"
-            if model.provider == "anthropic_compatible"
-            else model.provider.replace("_", "-")
+            if stored_provider == "anthropic_compatible"
+            else stored_provider.replace("_", "-")
         )
 
         # Create model based on type (Esperanto will cache the instance)
         if model.type == "language":
             return AIFactory.create_language(
-                model_name=model.name,
+                model_name=model_name,
                 provider=provider,
                 config=config,
             )
         elif model.type == "embedding":
             return AIFactory.create_embedding(
-                model_name=model.name,
+                model_name=model_name,
                 provider=provider,
                 config=config,
             )
         elif model.type == "speech_to_text":
             return AIFactory.create_speech_to_text(
-                model_name=model.name,
+                model_name=model_name,
                 provider=provider,
                 config=config,
             )
         elif model.type == "text_to_speech":
             return AIFactory.create_text_to_speech(
-                model_name=model.name,
+                model_name=model_name,
                 provider=provider,
                 config=config,
             )

@@ -57,9 +57,10 @@ class ObjectModel(BaseModel):
                     raise InvalidInputError(f"Invalid order_by field: '{parts[0]}'")
                 validated_clauses.append(parts[0].lower())
             elif len(parts) == 2:
-                if not allowed_field_pattern.match(
-                    parts[0].lower()
-                ) or parts[1].lower() not in allowed_directions:
+                if (
+                    not allowed_field_pattern.match(parts[0].lower())
+                    or parts[1].lower() not in allowed_directions
+                ):
                     raise InvalidInputError(
                         f"Invalid order_by clause: '{clause.strip()}'"
                     )
@@ -177,6 +178,14 @@ class ObjectModel(BaseModel):
             result_list: List[Dict[str, Any]] = (
                 repo_result if isinstance(repo_result, list) else [repo_result]
             )
+            if not result_list:
+                # An UPDATE against a record that no longer exists returns an
+                # empty result set rather than raising. Surface which record
+                # vanished instead of letting result_list[0] throw a bare
+                # IndexError from deep in the ORM.
+                raise DatabaseOperationError(
+                    f"{self.__class__.table_name} record {self.id} no longer exists"
+                )
             for key, value in result_list[0].items():
                 if hasattr(self, key):
                     if isinstance(getattr(self, key), BaseModel):
@@ -189,6 +198,9 @@ class ObjectModel(BaseModel):
             raise
         except RuntimeError:
             # Transaction conflicts should propagate for retry
+            raise
+        except DatabaseOperationError:
+            # Already the right type with a useful message; don't re-wrap it.
             raise
         except Exception as e:
             logger.error(f"Error saving record: {e}")

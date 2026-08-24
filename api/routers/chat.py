@@ -1,9 +1,8 @@
-import asyncio
+import time
 import traceback
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -13,6 +12,12 @@ from api.routers._chat_shared import (
     extract_chat_messages,
     get_session_or_404,
 )
+from open_notebook.context import for_chat as build_notebook_context
+from open_notebook.conversations.runtime import (
+    graph_get_state,
+    graph_invoke,
+    session_message_count,
+)
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatSession, Notebook
 from open_notebook.exceptions import (
@@ -21,8 +26,6 @@ from open_notebook.exceptions import (
 )
 from open_notebook.graphs.chat import graph as chat_graph
 from open_notebook.utils import token_count
-from open_notebook.utils.context_builder import build_notebook_context
-from open_notebook.utils.graph_utils import get_session_message_count
 
 router = APIRouter()
 
@@ -88,6 +91,13 @@ class BuildContextResponse(BaseModel):
     context: Dict[str, Any] = Field(..., description="Built context data")
     token_count: int = Field(..., description="Estimated token count")
     char_count: int = Field(..., description="Character count")
+    # Plain concatenated text already assembled server-side. Clients that need
+    # a string (e.g. podcast generate) must use this — re-stringifying the
+    # structured `context` tree freezes the browser on large notebooks.
+    content: str = Field(
+        default="",
+        description="Concatenated context text (prefer over JSON.stringify(context))",
+    )
 
 
 @router.get("/chat/sessions", response_model=List[ChatSessionResponse])
@@ -102,26 +112,20 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
         # Get sessions for this notebook
         sessions_list = await notebook.get_chat_sessions()
 
-        results = []
-        for session in sessions_list:
-            session_id = str(session.id)
-
-            # Get message count from LangGraph state
-            msg_count = await get_session_message_count(chat_graph, session_id)
-
-            results.append(
-                ChatSessionResponse(
-                    id=session.id or "",
-                    title=session.title or "Untitled Session",
-                    notebook_id=notebook_id,
-                    created=str(session.created),
-                    updated=str(session.updated),
-                    message_count=msg_count,
-                    model_override=getattr(session, "model_override", None),
-                )
+        # Omit per-session LangGraph checkpoint opens (was N+1 to_thread
+        # get_state). Detail endpoint still returns accurate message_count.
+        return [
+            ChatSessionResponse(
+                id=session.id or "",
+                title=session.title or "Untitled Session",
+                notebook_id=notebook_id,
+                created=str(session.created),
+                updated=str(session.updated),
+                message_count=None,
+                model_override=getattr(session, "model_override", None),
             )
-
-        return results
+            for session in sessions_list
+        ]
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Notebook not found")
     except HTTPException:
@@ -131,7 +135,7 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
     except Exception as e:
         logger.error(f"Error fetching chat sessions: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error fetching chat sessions: {str(e)}"
+            status_code=500, detail="Error fetching chat sessions"
         )
 
 
@@ -147,7 +151,7 @@ async def create_session(request: CreateSessionRequest):
         # Create new session
         session = ChatSession(
             title=request.title
-            or f"Chat Session {asyncio.get_event_loop().time():.0f}",
+            or f"Chat Session {time.time():.0f}",
             model_override=request.model_override,
         )
         await session.save()
@@ -173,7 +177,7 @@ async def create_session(request: CreateSessionRequest):
     except Exception as e:
         logger.error(f"Error creating chat session: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error creating chat session: {str(e)}"
+            status_code=500, detail="Error creating chat session"
         )
 
 
@@ -186,12 +190,7 @@ async def get_session(session_id: str):
         # Get session (normalizes the ID and 404s if missing)
         full_session_id, session = await get_session_or_404(session_id)
 
-        # Get session state from LangGraph to retrieve messages
-        # Use sync get_state() in a thread since SqliteSaver doesn't support async
-        thread_state = await asyncio.to_thread(
-            chat_graph.get_state,
-            config=RunnableConfig(configurable={"thread_id": full_session_id}),
-        )
+        thread_state = await graph_get_state(chat_graph, full_session_id)
 
         # Extract messages from state
         messages: list[ChatMessage] = []
@@ -230,7 +229,7 @@ async def get_session(session_id: str):
         raise
     except Exception as e:
         logger.error(f"Error fetching session: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching session: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching session")
 
 
 @router.put("/chat/sessions/{session_id}", response_model=ChatSessionResponse)
@@ -258,7 +257,7 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
         notebook_id = notebook_query[0]["out"] if notebook_query else None
 
         # Get message count from LangGraph state
-        msg_count = await get_session_message_count(chat_graph, full_session_id)
+        msg_count = await session_message_count(chat_graph, full_session_id)
 
         return ChatSessionResponse(
             id=session.id or "",
@@ -277,7 +276,7 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
         raise
     except Exception as e:
         logger.error(f"Error updating session: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error updating session: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error updating session")
 
 
 @router.delete("/chat/sessions/{session_id}", response_model=SuccessResponse)
@@ -298,7 +297,7 @@ async def delete_session(session_id: str):
         raise
     except Exception as e:
         logger.error(f"Error deleting session: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error deleting session: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error deleting session")
 
 
 @router.post("/chat/execute", response_model=ExecuteChatResponse)
@@ -324,12 +323,7 @@ async def execute_chat(request: ExecuteChatRequest):
             else getattr(session, "model_override", None)
         )
 
-        # Get current state
-        # Use sync get_state() in a thread since SqliteSaver doesn't support async
-        current_state = await asyncio.to_thread(
-            chat_graph.get_state,
-            config=RunnableConfig(configurable={"thread_id": full_session_id}),
-        )
+        current_state = await graph_get_state(chat_graph, full_session_id)
 
         # Prepare state for execution
         state_values = current_state.values if current_state else {}
@@ -338,30 +332,17 @@ async def execute_chat(request: ExecuteChatRequest):
         state_values["notebook"] = notebook
         state_values["model_override"] = model_override
 
-        # Add user message to state
         from langchain_core.messages import HumanMessage
 
         user_message = HumanMessage(content=request.message)
         state_values["messages"].append(user_message)
 
-        # Execute chat graph in a thread so the synchronous LangGraph invoke
-        # (SqliteSaver checkpoints are sync) doesn't block the event loop and
-        # freeze the rest of the API while the LLM responds. Mirrors the
-        # get_state() calls above.
-        # The lambda pins down which `invoke` overload is used; asyncio.to_thread
-        # can't resolve overloaded callables on its own. The ignore is a langgraph
-        # typing limitation: it accepts a partial state dict at runtime, but the
-        # signature requires the full state type.
-        result = await asyncio.to_thread(
-            lambda: chat_graph.invoke(
-                input=state_values,  # type: ignore[arg-type]
-                config=RunnableConfig(
-                    configurable={
-                        "thread_id": full_session_id,
-                        "model_id": model_override,
-                    }
-                ),
-            )
+        # LangGraph + SqliteSaver are sync; graph_invoke runs them off-loop.
+        result = await graph_invoke(
+            chat_graph,
+            state_values,  # type: ignore[arg-type]
+            full_session_id,
+            configurable={"model_id": model_override},
         )
 
         # Update session timestamp
@@ -385,7 +366,7 @@ async def execute_chat(request: ExecuteChatRequest):
             f"  Model override: {request.model_override}\n"
             f"  Traceback:\n{traceback.format_exc()}"
         )
-        raise HTTPException(status_code=500, detail=f"Error executing chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error executing chat")
 
 
 @router.post("/chat/context", response_model=BuildContextResponse)
@@ -405,7 +386,10 @@ async def build_context(request: BuildContextRequest):
         estimated_tokens = token_count(total_content) if total_content else 0
 
         return BuildContextResponse(
-            context=context_data, token_count=estimated_tokens, char_count=char_count
+            context=context_data,
+            token_count=estimated_tokens,
+            char_count=char_count,
+            content=total_content,
         )
     except HTTPException:
         raise
@@ -413,4 +397,4 @@ async def build_context(request: BuildContextRequest):
         raise
     except Exception as e:
         logger.error(f"Error building context: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error building context: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error building context")

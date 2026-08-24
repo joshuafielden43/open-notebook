@@ -17,18 +17,21 @@ router = APIRouter()
 @router.get("/notes", response_model=List[NoteResponse])
 async def get_notes(
     notebook_id: Optional[str] = Query(None, description="Filter by notebook ID"),
+    limit: int = Query(100, ge=1, le=500, description="Max notes to return"),
+    offset: int = Query(0, ge=0, description="Number of notes to skip"),
 ):
-    """Get all notes with optional notebook filtering."""
+    """Get notes with optional notebook filtering and pagination."""
     try:
         if notebook_id:
-            # Get notes for a specific notebook
             from open_notebook.domain.notebook import Notebook
 
             notebook = await Notebook.get(notebook_id)
             notes = await notebook.get_notes()
         else:
-            # Get all notes
             notes = await Note.get_all(order_by="updated desc")
+
+        # In-memory page (list helpers do not yet project at SQL layer).
+        page = notes[offset : offset + limit]
 
         return [
             NoteResponse(
@@ -39,7 +42,7 @@ async def get_notes(
                 created=str(note.created),
                 updated=str(note.updated),
             )
-            for note in notes
+            for note in page
         ]
     except HTTPException:
         raise
@@ -49,7 +52,7 @@ async def get_notes(
         raise
     except Exception as e:
         logger.error(f"Error fetching notes: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching notes: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching notes")
 
 
 @router.post("/notes", response_model=NoteResponse)
@@ -115,7 +118,7 @@ async def create_note(note_data: NoteCreate):
         raise
     except Exception as e:
         logger.error(f"Error creating note: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error creating note: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error creating note")
 
 
 @router.get("/notes/{note_id}", response_model=NoteResponse)
@@ -140,7 +143,7 @@ async def get_note(note_id: str):
         raise
     except Exception as e:
         logger.error(f"Error fetching note {note_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching note: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching note")
 
 
 @router.put("/notes/{note_id}", response_model=NoteResponse)
@@ -183,7 +186,7 @@ async def update_note(note_id: str, note_update: NoteUpdate):
         raise
     except Exception as e:
         logger.error(f"Error updating note {note_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error updating note: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error updating note")
 
 
 @router.delete("/notes/{note_id}")
@@ -203,4 +206,4 @@ async def delete_note(note_id: str):
         raise
     except Exception as e:
         logger.error(f"Error deleting note {note_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error deleting note: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error deleting note")

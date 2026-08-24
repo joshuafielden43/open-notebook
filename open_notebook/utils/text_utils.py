@@ -4,7 +4,6 @@ Extracted from main utils to avoid circular imports.
 """
 
 import re
-import unicodedata
 from typing import Tuple
 
 # Patterns for matching thinking content in AI responses
@@ -12,31 +11,6 @@ from typing import Tuple
 THINK_PATTERN = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 # Pattern for malformed output: content</think> (missing opening tag)
 THINK_PATTERN_NO_OPEN = re.compile(r"^(.*?)</think>", re.DOTALL)
-
-
-def remove_non_ascii(text: str) -> str:
-    """Remove non-ASCII characters from text."""
-    return re.sub(r"[^\x00-\x7F]+", "", text)
-
-
-def remove_non_printable(text: str) -> str:
-    """Remove non-printable characters from text."""
-    # Replace any special Unicode whitespace characters with a regular space
-    text = re.sub(r"[\u2000-\u200B\u202F\u205F\u3000]", " ", text)
-
-    # Replace unusual line terminators with a single newline
-    text = re.sub(r"[\u2028\u2029\r]", "\n", text)
-
-    # Remove control characters, except newlines and tabs
-    text = "".join(
-        char for char in text if unicodedata.category(char)[0] != "C" or char in "\n\t"
-    )
-
-    # Replace non-breaking spaces with regular spaces
-    text = text.replace("\xa0", " ").strip()
-
-    # Keep letters (including accented ones), numbers, spaces, newlines, tabs, and basic punctuation
-    return re.sub(r"[^\w\s.,!?\-\n\t]", "", text, flags=re.UNICODE)
 
 
 def parse_thinking_content(content: str) -> Tuple[str, str]:

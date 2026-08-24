@@ -1,11 +1,10 @@
-import asyncio
 import json
+import time
 from typing import AsyncGenerator, List, Optional
 
 from fastapi import APIRouter, HTTPException, Path
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
-from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -16,6 +15,11 @@ from api.routers._chat_shared import (
     get_source_or_404,
     get_verified_source_session,
 )
+from open_notebook.conversations.runtime import (
+    graph_get_state,
+    graph_invoke,
+    session_message_count,
+)
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatSession
 from open_notebook.exceptions import (
@@ -23,7 +27,6 @@ from open_notebook.exceptions import (
     OpenNotebookError,
 )
 from open_notebook.graphs.source_chat import source_chat_graph as source_chat_graph
-from open_notebook.utils.graph_utils import get_session_message_count
 
 router = APIRouter()
 
@@ -94,7 +97,7 @@ async def create_source_chat_session(
 
         # Create new session with model_override support
         session = ChatSession(
-            title=request.title or f"Source Chat {asyncio.get_event_loop().time():.0f}",
+            title=request.title or f"Source Chat {time.time():.0f}",
             model_override=request.model_override,
         )
         await session.save()
@@ -120,7 +123,7 @@ async def create_source_chat_session(
     except Exception as e:
         logger.error(f"Error creating source chat session: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error creating source chat session: {str(e)}"
+            status_code=500, detail="Error creating source chat session"
         )
 
 
@@ -151,11 +154,7 @@ async def get_source_chat_sessions(source_id: str = Path(..., description="Sourc
                 if session_result and len(session_result) > 0:
                     session_data = session_result[0]
 
-                    # Get message count from LangGraph state
-                    msg_count = await get_session_message_count(
-                        source_chat_graph, session_id
-                    )
-
+                    # Skip per-session checkpoint opens on list (N+1).
                     sessions.append(
                         SourceChatSessionResponse(
                             id=session_data.get("id") or "",
@@ -164,7 +163,7 @@ async def get_source_chat_sessions(source_id: str = Path(..., description="Sourc
                             model_override=session_data.get("model_override"),
                             created=str(session_data.get("created")),
                             updated=str(session_data.get("updated")),
-                            message_count=msg_count,
+                            message_count=None,
                         )
                     )
 
@@ -180,7 +179,7 @@ async def get_source_chat_sessions(source_id: str = Path(..., description="Sourc
     except Exception as e:
         logger.error(f"Error fetching source chat sessions: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error fetching source chat sessions: {str(e)}"
+            status_code=500, detail="Error fetching source chat sessions"
         )
 
 
@@ -199,12 +198,7 @@ async def get_source_chat_session(
             await get_verified_source_session(source_id, session_id)
         )
 
-        # Get session state from LangGraph to retrieve messages
-        # Use sync get_state() in a thread since SqliteSaver doesn't support async
-        thread_state = await asyncio.to_thread(
-            source_chat_graph.get_state,
-            config=RunnableConfig(configurable={"thread_id": full_session_id}),
-        )
+        thread_state = await graph_get_state(source_chat_graph, full_session_id)
 
         # Extract messages from state
         messages: list[ChatMessage] = []
@@ -244,7 +238,7 @@ async def get_source_chat_session(
     except Exception as e:
         logger.error(f"Error fetching source chat session: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error fetching source chat session: {str(e)}"
+            status_code=500, detail="Error fetching source chat session"
         )
 
 
@@ -273,7 +267,7 @@ async def update_source_chat_session(
         await session.save()
 
         # Get message count from LangGraph state
-        msg_count = await get_session_message_count(source_chat_graph, full_session_id)
+        msg_count = await session_message_count(source_chat_graph, full_session_id)
 
         return SourceChatSessionResponse(
             id=session.id or "",
@@ -293,7 +287,7 @@ async def update_source_chat_session(
     except Exception as e:
         logger.error(f"Error updating source chat session: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error updating source chat session: {str(e)}"
+            status_code=500, detail="Error updating source chat session"
         )
 
 
@@ -325,7 +319,7 @@ async def delete_source_chat_session(
     except Exception as e:
         logger.error(f"Error deleting source chat session: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error deleting source chat session: {str(e)}"
+            status_code=500, detail="Error deleting source chat session"
         )
 
 
@@ -334,42 +328,24 @@ async def stream_source_chat_response(
 ) -> AsyncGenerator[str, None]:
     """Stream the source chat response as Server-Sent Events."""
     try:
-        # Get current state
-        # Use sync get_state() in a thread since SqliteSaver doesn't support async
-        current_state = await asyncio.to_thread(
-            source_chat_graph.get_state,
-            config=RunnableConfig(configurable={"thread_id": session_id}),
-        )
+        current_state = await graph_get_state(source_chat_graph, session_id)
 
-        # Prepare state for execution
         state_values = current_state.values if current_state else {}
         state_values["messages"] = state_values.get("messages", [])
         state_values["source_id"] = source_id
         state_values["model_override"] = model_override
 
-        # Add user message to state
         user_message = HumanMessage(content=message)
         state_values["messages"].append(user_message)
 
-        # Send user message event
         user_event = {"type": "user_message", "content": message, "timestamp": None}
         yield f"data: {json.dumps(user_event)}\n\n"
 
-        # Run the synchronous LangGraph invoke in a thread so it doesn't block the
-        # event loop. While blocked, even the already-yielded SSE events can't
-        # flush and every other request stalls until the LLM finishes. Mirrors the
-        # get_state() calls above.
-        # The lambda pins down which `invoke` overload is used; asyncio.to_thread
-        # can't resolve overloaded callables on its own. The ignore is a langgraph
-        # typing limitation: it accepts a partial state dict at runtime, but the
-        # signature requires the full state type.
-        result = await asyncio.to_thread(
-            lambda: source_chat_graph.invoke(
-                input=state_values,  # type: ignore[arg-type]
-                config=RunnableConfig(
-                    configurable={"thread_id": session_id, "model_id": model_override}
-                ),
-            )
+        result = await graph_invoke(
+            source_chat_graph,
+            state_values,  # type: ignore[arg-type]
+            session_id,
+            configurable={"model_id": model_override},
         )
 
         # Stream the complete AI response
@@ -450,4 +426,4 @@ async def send_message_to_source_chat(
         raise
     except Exception as e:
         logger.error(f"Error sending message to source chat: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error sending message: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error sending message")

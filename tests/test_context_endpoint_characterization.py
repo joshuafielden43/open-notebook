@@ -97,8 +97,13 @@ async def test_config_string_matching_semantics(client):
     assert body["context"]["notes"] == [{"id": "note:n2", "content": "note body"}]
 
     # "insights" -> short context, "full content" -> long context
-    source_short.get_context.assert_awaited_once_with(context_size="short")
-    source_long.get_context.assert_awaited_once_with(context_size="long")
+    # (insights= kwarg comes from the batched SourceInsight fetch path)
+    source_short.get_context.assert_awaited_once_with(
+        context_size="short", insights=[]
+    )
+    source_long.get_context.assert_awaited_once_with(
+        context_size="long", insights=[]
+    )
     note_full.get_context.assert_called_once_with(context_size="long")
 
     # char_count is the length of the concatenated str() of every context dict

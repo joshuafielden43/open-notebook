@@ -270,15 +270,111 @@ async def _provision_anthropic_compatible() -> bool:
     )
 
 
+async def resolve_provider_config(provider: str) -> dict:
+    """Build an Esperanto ``config`` dict without mutating ``os.environ``.
+
+    Preference order:
+    1. Default Credential for the provider (DB)
+    2. Existing process environment (read-only)
+
+    Model construction should prefer this over :func:`provision_provider_keys`
+    so concurrent requests do not clobber each other's env.
+    """
+    provider_lower = provider.lower().replace("-", "_")
+
+    # DB credential first
+    if provider_lower in ("openai_compatible", "anthropic_compatible"):
+        cred = await _get_default_credential(provider_lower)
+    elif provider_lower in ("vertex", "azure"):
+        cred = await _get_default_credential(provider_lower)
+    else:
+        cred = await _get_default_credential(provider_lower)
+
+    if cred:
+        cred_config = cred.to_esperanto_config()
+        if cred_config:
+            logger.debug(
+                f"Resolved {provider} config from Credential (no env mutation)"
+            )
+            return cred_config
+
+    # Environment read-only fallback
+    config: dict = {}
+    if provider_lower == "vertex":
+        if os.environ.get("VERTEX_PROJECT"):
+            config["vertex_project"] = os.environ["VERTEX_PROJECT"]
+        if os.environ.get("VERTEX_LOCATION"):
+            config["vertex_location"] = os.environ["VERTEX_LOCATION"]
+        if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+            config["credentials_path"] = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+        return config
+
+    if provider_lower == "azure":
+        if os.environ.get("AZURE_OPENAI_API_KEY"):
+            config["api_key"] = os.environ["AZURE_OPENAI_API_KEY"]
+        if os.environ.get("AZURE_OPENAI_API_VERSION"):
+            config["api_version"] = os.environ["AZURE_OPENAI_API_VERSION"]
+        endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+        if endpoint:
+            config["endpoint"] = endpoint
+            config["base_url"] = endpoint
+        for key, env in (
+            ("endpoint_llm", "AZURE_OPENAI_ENDPOINT_LLM"),
+            ("endpoint_embedding", "AZURE_OPENAI_ENDPOINT_EMBEDDING"),
+            ("endpoint_stt", "AZURE_OPENAI_ENDPOINT_STT"),
+            ("endpoint_tts", "AZURE_OPENAI_ENDPOINT_TTS"),
+        ):
+            if os.environ.get(env):
+                config[key] = os.environ[env]
+        return config
+
+    if provider_lower == "openai_compatible":
+        if os.environ.get("OPENAI_COMPATIBLE_API_KEY"):
+            config["api_key"] = os.environ["OPENAI_COMPATIBLE_API_KEY"]
+        if os.environ.get("OPENAI_COMPATIBLE_BASE_URL"):
+            config["base_url"] = os.environ["OPENAI_COMPATIBLE_BASE_URL"]
+        return config
+
+    if provider_lower == "anthropic_compatible":
+        if os.environ.get("ANTHROPIC_COMPATIBLE_API_KEY"):
+            config["api_key"] = os.environ["ANTHROPIC_COMPATIBLE_API_KEY"]
+        if os.environ.get("ANTHROPIC_COMPATIBLE_BASE_URL"):
+            config["base_url"] = os.environ["ANTHROPIC_COMPATIBLE_BASE_URL"]
+        return config
+
+    if provider_lower == "ollama":
+        base = os.environ.get("OLLAMA_API_BASE")
+        if base:
+            config["base_url"] = base
+        return config
+
+    if provider_lower == "omlx":
+        if os.environ.get("OMLX_API_KEY"):
+            config["api_key"] = os.environ["OMLX_API_KEY"]
+        if os.environ.get("OMLX_API_BASE"):
+            config["base_url"] = os.environ["OMLX_API_BASE"]
+        return config
+
+    # Simple api_key providers
+    info = PROVIDER_CONFIG.get(provider_lower)
+    if info:
+        env_var = info["env_var"]
+        value = os.environ.get(env_var)
+        if value:
+            # URL-style primary vars (rare in this branch) vs API keys
+            if env_var.endswith("_API_BASE") or env_var.endswith("_BASE_URL"):
+                config["base_url"] = value
+            else:
+                config["api_key"] = value
+    return config
+
+
 async def provision_provider_keys(provider: str) -> bool:
     """
     Provision environment variables from database for a specific provider.
 
-    This function checks if the provider has a Credential record stored in the
-    database and sets the corresponding environment variables. If the database
-    doesn't have the configuration, existing environment variables remain unchanged.
-
-    This is the main entry point for the DB->Env fallback mechanism.
+    Prefer :func:`resolve_provider_config` for model construction. This remains
+    for code paths that still require process env (discovery SDKs, legacy).
 
     Args:
         provider: Provider name (openai, anthropic, azure, vertex,
@@ -286,11 +382,6 @@ async def provision_provider_keys(provider: str) -> bool:
 
     Returns:
         True if any keys were set from database, False otherwise
-
-    Example:
-        # Before provisioning a model, ensure DB keys are in env vars
-        await provision_provider_keys("openai")
-        model = AIFactory.create_language(model_name="gpt-4", provider="openai")
     """
     # Normalize provider name
     provider_lower = provider.lower()

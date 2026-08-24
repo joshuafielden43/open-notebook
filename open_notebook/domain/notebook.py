@@ -67,71 +67,11 @@ class Notebook(ObjectModel):
             logger.exception(e)
             raise DatabaseOperationError(e)
 
-    async def get_context(self) -> str:
-        """
-        Build long-form notebook context for podcast and LLM workflows.
+    async def get_context(self, max_chars: Optional[int] = None) -> str:
+        """Long-form podcast context — delegates to ``open_notebook.context.for_podcast``."""
+        from open_notebook.context import for_podcast
 
-        Normal list retrieval omits large source/note bodies, so this method uses
-        opt-in full-content fetches and formats only substantive context blocks.
-        """
-        sources = await self.get_sources(include_full_text=True)
-        notes = await self.get_notes(include_content=True)
-        context_blocks = []
-
-        insights_by_source = await SourceInsight.get_for_sources(
-            [source.id for source in sources if source.id]
-        )
-        for source in sources:
-            source_context = await source.get_context(
-                context_size="long",
-                insights=insights_by_source.get(source.id or "", []),
-            )
-            if isinstance(source_context, dict):
-                title = source_context.get("title") or source.title or "Untitled source"
-                full_text = source_context.get("full_text")
-                insights = source_context.get("insights") or []
-
-                content_parts = []
-                if full_text:
-                    content_parts.append(str(full_text))
-
-                insight_lines = []
-                for insight in insights:
-                    if not isinstance(insight, dict):
-                        continue
-
-                    insight_content = insight.get("content")
-                    if not insight_content:
-                        continue
-
-                    insight_type = insight.get("insight_type") or "Insight"
-                    insight_lines.append(f"- {insight_type}: {insight_content}")
-
-                if insight_lines:
-                    content_parts.append("Insights:\n" + "\n".join(insight_lines))
-
-                content = "\n\n".join(content_parts).strip()
-            else:
-                title = source.title or "Untitled source"
-                content = str(source_context).strip()
-
-            if content:
-                context_blocks.append(f"## Source: {title}\n\n{content}")
-
-        for note in notes:
-            note_context = note.get_context(context_size="long")
-            if isinstance(note_context, dict):
-                title = note_context.get("title") or note.title or "Untitled note"
-                content = note_context.get("content")
-                content = str(content).strip() if content else ""
-            else:
-                title = note.title or "Untitled note"
-                content = str(note_context).strip()
-
-            if content:
-                context_blocks.append(f"## Note: {title}\n\n{content}")
-
-        return "\n\n".join(context_blocks)
+        return await for_podcast(self, max_chars=max_chars)
 
     async def get_chat_sessions(self) -> List["ChatSession"]:
         try:
@@ -481,7 +421,9 @@ class Source(ObjectModel):
         # Callers looping over many sources can batch-fetch insights up front
         # via SourceInsight.get_for_sources() and pass them in here, instead
         # of paying a separate query per source.
-        insight_objects = insights if insights is not None else await self.get_insights()
+        insight_objects = (
+            insights if insights is not None else await self.get_insights()
+        )
         insights = [insight.model_dump() for insight in insight_objects]
         if context_size == "long":
             return dict(
@@ -626,7 +568,9 @@ class Source(ObjectModel):
             return str(command_id)
 
         except Exception as e:
-            logger.exception(f"Error submitting create_insight for source {self.id}: {e}")
+            logger.exception(
+                f"Error submitting create_insight for source {self.id}: {e}"
+            )
             raise DatabaseOperationError(e)
 
     def _prepare_save_data(self) -> dict:
@@ -820,6 +764,14 @@ async def vector_search(
 
         # Use unified embedding function (handles chunking if query is very long)
         embed = await generate_embedding(keyword)
+
+        from open_notebook.vectorstore import qdrant_enabled, vector_search_qdrant
+
+        if qdrant_enabled():
+            return await vector_search_qdrant(
+                embed, results, source, note, minimum_score
+            )
+
         search_results = await repo_query(
             """
             SELECT * FROM fn::vector_search($embed, $results, $source, $note, $minimum_score);

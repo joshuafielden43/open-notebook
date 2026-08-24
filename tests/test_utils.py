@@ -10,6 +10,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from open_notebook.context.assembly import (
+    SOURCE_TRUNCATION_NOTICE,
+    _truncate_source_to_token_budget,
+    build_source_context,
+)
 from open_notebook.domain.notebook import Source
 from open_notebook.graphs.source_chat import (
     _format_source_context,
@@ -20,14 +25,7 @@ from open_notebook.utils import (
     compare_versions,
     get_installed_version,
     parse_thinking_content,
-    remove_non_ascii,
-    remove_non_printable,
     token_count,
-)
-from open_notebook.utils.context_builder import (
-    SOURCE_TRUNCATION_NOTICE,
-    _truncate_source_to_token_budget,
-    build_source_context,
 )
 
 # ============================================================================
@@ -37,41 +35,6 @@ from open_notebook.utils.context_builder import (
 
 class TestTextUtilities:
     """Test suite for text utility functions."""
-
-    def test_remove_non_ascii(self):
-        """Test removal of non-ASCII characters."""
-        # Text with various non-ASCII characters
-        text_with_unicode = "Hello 世界 café naïve émoji 🎉"
-        result = remove_non_ascii(text_with_unicode)
-
-        # Should only contain ASCII characters
-        assert result == "Hello  caf nave moji "
-        # All characters should be in ASCII range
-        assert all(ord(char) < 128 for char in result)
-
-    def test_remove_non_ascii_pure_ascii(self):
-        """Test that pure ASCII text is unchanged."""
-        text = "Hello World 123 !@#"
-        result = remove_non_ascii(text)
-        assert result == text
-
-    def test_remove_non_printable(self):
-        """Test removal of non-printable characters."""
-        # Text with various Unicode whitespace and control chars
-        text = "Hello\u2000World\u200b\u202fTest"
-        result = remove_non_printable(text)
-
-        # Should have regular spaces and printable chars only
-        assert "Hello" in result
-        assert "World" in result
-        assert "Test" in result
-
-    def test_remove_non_printable_preserves_newlines(self):
-        """Test that newlines and tabs are preserved."""
-        text = "Line1\nLine2\tTabbed"
-        result = remove_non_printable(text)
-        assert "\n" in result
-        assert "\t" in result
 
     def test_parse_thinking_content_basic(self):
         """Test parsing single thinking block."""
@@ -284,7 +247,7 @@ class TestBuildSourceContext:
         source = _mock_source([_insight("source_insight:1")])
 
         with patch(
-            "open_notebook.utils.context_builder.Source.get",
+            "open_notebook.context.assembly.Source.get",
             new=AsyncMock(return_value=source),
         ) as mock_get:
             result = await build_source_context("123")
@@ -331,7 +294,7 @@ class TestBuildSourceContext:
         )
 
         with patch(
-            "open_notebook.utils.context_builder.Source.get",
+            "open_notebook.context.assembly.Source.get",
             new=AsyncMock(return_value=source),
         ):
             result = await build_source_context("source:123", max_tokens=600)
@@ -350,7 +313,7 @@ class TestBuildSourceContext:
 
         with (
             patch(
-                "open_notebook.utils.context_builder.Source.get",
+                "open_notebook.context.assembly.Source.get",
                 new=AsyncMock(return_value=source),
             ),
             patch.object(Source, "get_insights", new=mock_get_insights),
@@ -372,7 +335,7 @@ class TestBuildSourceContext:
         source.get_context.return_value["full_text"] = full_text
 
         with patch(
-            "open_notebook.utils.context_builder.Source.get",
+            "open_notebook.context.assembly.Source.get",
             new=AsyncMock(return_value=source),
         ):
             first = await build_source_context("source:123", max_tokens=120)
@@ -428,7 +391,7 @@ class TestBuildSourceContext:
         source.get_context.return_value["full_text"] = full_text
 
         with patch(
-            "open_notebook.utils.context_builder.Source.get",
+            "open_notebook.context.assembly.Source.get",
             new=AsyncMock(return_value=source),
         ):
             result = await build_source_context("source:123", max_tokens=500)
@@ -446,7 +409,7 @@ class TestBuildSourceContext:
         source.get_context.return_value["full_text"] = "evidence " * 1000
 
         with patch(
-            "open_notebook.utils.context_builder.Source.get",
+            "open_notebook.context.assembly.Source.get",
             new=AsyncMock(return_value=source),
         ):
             result = await build_source_context("source:123", max_tokens=1)
@@ -472,14 +435,10 @@ class TestBuildSourceContext:
             "full_text": "e" + SOURCE_TRUNCATION_NOTICE,
         }
         notice_tokens = token_count(
-            _format_source_context(
-                {"sources": [notice_only], "insights": []}
-            )
+            _format_source_context({"sources": [notice_only], "insights": []})
         )
         one_character_tokens = token_count(
-            _format_source_context(
-                {"sources": [one_character], "insights": []}
-            )
+            _format_source_context({"sources": [one_character], "insights": []})
         )
         assert notice_tokens < one_character_tokens
 
@@ -606,7 +565,7 @@ class TestBuildSourceContext:
         encoding = CountingEncoding()
         with (
             patch(
-                "open_notebook.utils.context_builder.Source.get",
+                "open_notebook.context.assembly.Source.get",
                 new=AsyncMock(return_value=source),
             ),
             patch("tiktoken.get_encoding", return_value=encoding),
@@ -663,7 +622,7 @@ class TestBuildSourceContext:
         with (
             patch("tiktoken.get_encoding", side_effect=OSError("offline")),
             patch(
-                "open_notebook.utils.context_builder.token_count",
+                "open_notebook.context.assembly.token_count",
                 side_effect=fallback_count,
             ) as mock_token_count,
         ):
@@ -711,7 +670,7 @@ class TestBuildSourceContext:
         source.get_context.return_value["full_text"] = None
 
         with patch(
-            "open_notebook.utils.context_builder.Source.get",
+            "open_notebook.context.assembly.Source.get",
             new=AsyncMock(return_value=source),
         ):
             result = await build_source_context("source:123", max_tokens=500)
@@ -728,7 +687,7 @@ class TestBuildSourceContext:
         from open_notebook.exceptions import NotFoundError
 
         with patch(
-            "open_notebook.utils.context_builder.Source.get",
+            "open_notebook.context.assembly.Source.get",
             new=AsyncMock(side_effect=NotFoundError("nope")),
         ):
             result = await build_source_context("source:missing")

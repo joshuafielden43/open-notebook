@@ -41,17 +41,3 @@ def token_count(input_string: str) -> int:
             "tiktoken unavailable, falling back to word-count estimation: {}", e
         )
         return int(len(input_string.split()) * 1.3)
-
-
-def token_cost(token_count: int, cost_per_million: float = 0.150) -> float:
-    """
-    Calculate the cost of tokens based on the token count and cost per million tokens.
-
-    Args:
-        token_count (int): The number of tokens.
-        cost_per_million (float): The cost per million tokens. Default is 0.150.
-
-    Returns:
-        float: The calculated cost for the given token count.
-    """
-    return cost_per_million * (token_count / 1_000_000)

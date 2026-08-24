@@ -17,7 +17,7 @@ def client():
 
 
 class TestRecentlyViewedApi:
-    @patch("api.routers.notebooks.repo_query", new_callable=AsyncMock)
+    @patch("open_notebook.application.notebooks.repo_query", new_callable=AsyncMock)
     def test_recently_viewed_returns_mixed_items_newest_first(
         self, mock_repo_query, client
     ):
@@ -56,7 +56,7 @@ class TestRecentlyViewedApi:
             },
         ]
 
-    @patch("api.routers.notebooks.repo_query", new_callable=AsyncMock)
+    @patch("open_notebook.application.notebooks.repo_query", new_callable=AsyncMock)
     def test_recently_viewed_honors_limit(self, mock_repo_query, client):
         mock_repo_query.side_effect = [
             [
@@ -94,7 +94,7 @@ class TestRecentlyViewedApi:
         assert mock_repo_query.await_args_list[0].args[1] == {"limit": 2}
         assert mock_repo_query.await_args_list[1].args[1] == {"limit": 2}
 
-    @patch("api.routers.notebooks.repo_query", new_callable=AsyncMock)
+    @patch("open_notebook.application.notebooks.repo_query", new_callable=AsyncMock)
     def test_recently_viewed_empty_when_no_view_history(self, mock_repo_query, client):
         mock_repo_query.side_effect = [[], []]
 
@@ -103,7 +103,7 @@ class TestRecentlyViewedApi:
         assert response.status_code == 200
         assert response.json() == []
 
-    @patch("api.routers.notebooks.repo_query", new_callable=AsyncMock)
+    @patch("open_notebook.application.notebooks.repo_query", new_callable=AsyncMock)
     def test_get_notebook_stamps_last_viewed_at(self, mock_repo_query, client):
         mock_repo_query.side_effect = [
             [
@@ -154,7 +154,7 @@ class TestRecentlyViewedApi:
             in (mock_repo_query.await_args_list[0].args[0])
         )
 
-    @patch("api.routers.notebooks.repo_query", new_callable=AsyncMock)
+    @patch("open_notebook.application.notebooks.repo_query", new_callable=AsyncMock)
     def test_recently_viewed_reorders_after_notebook_is_viewed_again(
         self, mock_repo_query, client
     ):

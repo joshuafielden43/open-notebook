@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 from contextlib import asynccontextmanager
@@ -16,6 +17,52 @@ from open_notebook.utils.proxy import ensure_internal_no_proxy
 ensure_internal_no_proxy()
 
 T = TypeVar("T", Dict[str, Any], List[Dict[str, Any]])
+
+# Process-local pool: open/sign-in once per slot instead of per query.
+# OPEN_NOTEBOOK_DB_POOL_SIZE=1 disables pooling (always open/close).
+_pool: Optional[asyncio.Queue] = None
+_pool_loop: Optional[asyncio.AbstractEventLoop] = None
+_pool_init_lock = asyncio.Lock()
+_pool_disabled_logged = False
+
+
+def _pool_size() -> int:
+    raw = os.getenv("OPEN_NOTEBOOK_DB_POOL_SIZE", "8")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 8
+
+
+async def _open_connection() -> Any:
+    db = AsyncSurreal(get_database_url())
+    await db.signin(
+        {
+            "username": os.environ.get("SURREAL_USER"),
+            "password": get_database_password(),
+        }
+    )
+    await db.use(get_database_namespace(), get_database_name())
+    return db
+
+
+async def _ensure_pool() -> asyncio.Queue:
+    global _pool, _pool_loop, _pool_disabled_logged
+    if _pool is not None:
+        return _pool
+    async with _pool_init_lock:
+        if _pool is not None:
+            return _pool
+        size = _pool_size()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=size)
+        for _ in range(size):
+            await queue.put(await _open_connection())
+        _pool = queue
+        _pool_loop = asyncio.get_running_loop()
+        if not _pool_disabled_logged:
+            logger.info(f"SurrealDB connection pool ready (size={size})")
+            _pool_disabled_logged = True
+        return _pool
 
 # Bare SurrealDB table/relation identifier: no ':', whitespace, or query
 # syntax. Used to validate the parts of RELATE/UPSERT/UPDATE that name a
@@ -84,18 +131,71 @@ def ensure_record_id(value: Union[str, RecordID]) -> RecordID:
 
 @asynccontextmanager
 async def db_connection():
-    db = AsyncSurreal(get_database_url())
-    await db.signin(
-        {
-            "username": os.environ.get("SURREAL_USER"),
-            "password": get_database_password(),
-        }
-    )
-    await db.use(get_database_namespace(), get_database_name())
+    """Yield a pooled SurrealDB connection (open/sign-in amortized).
+
+    On query/transport failure the bad connection is discarded and replaced
+    so the next checkout is healthy.
+    """
+    # The pool's Queue and its futures belong to the loop that created it —
+    # in practice the API/worker main loop. Sync LangGraph nodes run on
+    # throwaway loops (run_coroutine_sync); handing them pooled connections
+    # raises "got Future attached to a different loop", which broke every
+    # chat turn once credential resolution moved to DB reads. Off-home loops
+    # get a direct connection instead: one open/close per call, correct on
+    # any loop, nothing leaked when the throwaway loop closes.
+    if _pool is not None and asyncio.get_running_loop() is not _pool_loop:
+        direct = await _open_connection()
+        try:
+            yield direct
+        finally:
+            try:
+                await direct.close()
+            except Exception:
+                pass
+        return
+
+    pool = await _ensure_pool()
+    db = await pool.get()
+    failed = False
     try:
         yield db
+    except Exception:
+        failed = True
+        raise
     finally:
-        await db.close()
+        if failed:
+            try:
+                await db.close()
+            except Exception:
+                pass
+            try:
+                db = await _open_connection()
+            except Exception as reconnect_err:
+                logger.error(f"SurrealDB reconnect failed: {reconnect_err}")
+                # Pool shrinks by one until process restart rather than
+                # re-queue a dead socket.
+                return
+        await pool.put(db)
+
+
+async def close_db_pool() -> None:
+    """Close every pooled connection (API/worker shutdown)."""
+    global _pool, _pool_loop
+    async with _pool_init_lock:
+        pool = _pool
+        _pool = None
+        _pool_loop = None
+    if pool is None:
+        return
+    while not pool.empty():
+        try:
+            db = pool.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        try:
+            await db.close()
+        except Exception:
+            pass
 
 
 async def repo_query(

@@ -1,0 +1,4 @@
+-- Migration 26 down: no-op. Restoring the prior mix (3 for solo_expert,
+-- 4 for tech_discussion, unknown for business_panel) is not tracked;
+-- operators can edit num_segments per profile.
+SELECT * FROM episode_profile LIMIT 1;

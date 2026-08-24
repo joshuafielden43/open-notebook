@@ -11,10 +11,11 @@ to ensure consistent behavior and proper handling of large content.
 """
 
 import asyncio
+import math
 import os
 from typing import List, Optional
+from weakref import WeakKeyDictionary
 
-import numpy as np
 from loguru import logger
 
 from .chunking import CHUNK_SIZE, ContentType, chunk_text
@@ -33,6 +34,8 @@ def _get_embedding_batch_size() -> int:
         value = int(raw)
         if value < 1:
             raise ValueError
+        if value != 50:
+            logger.info(f"Using OPEN_NOTEBOOK_EMBEDDING_BATCH_SIZE={value}")
         return value
     except ValueError:
         logger.warning(
@@ -47,6 +50,60 @@ EMBEDDING_MAX_RETRIES = 3
 EMBEDDING_RETRY_DELAY = 2  # seconds
 
 
+def _get_embedding_concurrency() -> int:
+    """
+    Max provider requests in flight across ALL jobs in this process.
+
+    Default 1: a serial local endpoint (e.g. single MLX server) answers N
+    interleaved requests slower than the same N in single file — measured 2x
+    worse at N=4 — so the pipeline overlaps provider calls with DB writes but
+    never with each other. Raise only for providers that truly parallelize.
+    """
+    raw = os.getenv("OPEN_NOTEBOOK_EMBEDDING_CONCURRENCY", "1").strip()
+    try:
+        value = int(raw)
+        if value < 1:
+            raise ValueError
+        if value != 1:
+            logger.info(f"Using OPEN_NOTEBOOK_EMBEDDING_CONCURRENCY={value}")
+        return value
+    except ValueError:
+        logger.warning(
+            "Invalid OPEN_NOTEBOOK_EMBEDDING_CONCURRENCY='{}'; falling back to 1",
+            raw,
+        )
+        return 1
+
+
+EMBEDDING_CONCURRENCY = _get_embedding_concurrency()
+
+# Semaphores are bound to an event loop; the API and the worker each run their
+# own. Keyed weakly so a discarded loop does not pin its gate in memory.
+_provider_gates: "WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
+    WeakKeyDictionary()
+)
+
+
+def _provider_gate() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    gate = _provider_gates.get(loop)
+    if gate is None:
+        gate = asyncio.Semaphore(EMBEDDING_CONCURRENCY)
+        _provider_gates[loop] = gate
+    return gate
+
+
+def _l2_norm(vec: List[float]) -> float:
+    return math.sqrt(sum(x * x for x in vec))
+
+
+def _normalize(vec: List[float]) -> List[float]:
+    norm = _l2_norm(vec)
+    if norm <= 0:
+        return list(vec)
+    return [x / norm for x in vec]
+
+
 async def mean_pool_embeddings(embeddings: List[List[float]]) -> List[float]:
     """
     Combine multiple embeddings into a single embedding using mean pooling.
@@ -55,52 +112,23 @@ async def mean_pool_embeddings(embeddings: List[List[float]]) -> List[float]:
     1. Normalize each embedding to unit length
     2. Compute element-wise mean
     3. Normalize the result to unit length
-
-    This approach ensures the final embedding has the same properties as
-    individual embeddings (unit length) regardless of input count.
-
-    Args:
-        embeddings: List of embedding vectors (each is a list of floats)
-
-    Returns:
-        Single embedding vector (mean pooled and normalized)
-
-    Raises:
-        ValueError: If embeddings list is empty or embeddings have different dimensions
     """
     if not embeddings:
         raise ValueError("Cannot mean pool empty list of embeddings")
 
+    dim = len(embeddings[0])
+    if dim == 0:
+        raise ValueError("Cannot mean pool zero-dimension embeddings")
+    for emb in embeddings:
+        if len(emb) != dim:
+            raise ValueError("All embeddings must have the same dimension")
+
     if len(embeddings) == 1:
-        # Single embedding - just normalize and return
-        arr = np.array(embeddings[0], dtype=np.float64)
-        norm = np.linalg.norm(arr)
-        if norm > 0:
-            arr = arr / norm
-        return arr.tolist()
+        return _normalize(list(embeddings[0]))
 
-    # Convert to numpy array
-    arr = np.array(embeddings, dtype=np.float64)
-
-    # Verify all embeddings have same dimension
-    if arr.ndim != 2:
-        raise ValueError(f"Expected 2D array, got shape {arr.shape}")
-
-    # Normalize each embedding to unit length
-    norms = np.linalg.norm(arr, axis=1, keepdims=True)
-    # Avoid division by zero
-    norms = np.where(norms > 0, norms, 1.0)
-    normalized = arr / norms
-
-    # Compute mean
-    mean = np.mean(normalized, axis=0)
-
-    # Normalize the result
-    mean_norm = np.linalg.norm(mean)
-    if mean_norm > 0:
-        mean = mean / mean_norm
-
-    return mean.tolist()
+    normalized = [_normalize(list(emb)) for emb in embeddings]
+    mean = [sum(row[i] for row in normalized) / len(normalized) for i in range(dim)]
+    return _normalize(mean)
 
 
 async def generate_embeddings(
@@ -173,7 +201,8 @@ async def generate_embeddings(
 
         for attempt in range(1, EMBEDDING_MAX_RETRIES + 1):
             try:
-                batch_embeddings = await embedding_model.aembed(batch)
+                async with _provider_gate():
+                    batch_embeddings = await embedding_model.aembed(batch)
                 all_embeddings.extend(batch_embeddings)
                 break
             except Exception as e:

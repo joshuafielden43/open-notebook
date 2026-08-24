@@ -1,0 +1,12 @@
+-- Migration 28: Index the notebook edge tables (reference, artifact)
+-- Inventory queries filter these edges by `out` (notebook side) and cleanup
+-- paths look up by `in`. Without indexes every listing page was a full
+-- edge-table scan. Vector indexes are NOT defined here: their dimension is
+-- per-install (chosen by the configured embedding model), so they are
+-- provisioned at runtime after migrations (see ADR-014 and
+-- open_notebook/database/vector_index.py).
+
+DEFINE INDEX IF NOT EXISTS idx_reference_in ON reference FIELDS in CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_reference_out ON reference FIELDS out CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_artifact_in ON artifact FIELDS in CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_artifact_out ON artifact FIELDS out CONCURRENTLY;

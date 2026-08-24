@@ -16,7 +16,6 @@ from fastapi import (
 from fastapi.responses import FileResponse, Response
 from loguru import logger
 from pydantic import ValidationError
-from surreal_commands import execute_command_sync, submit_command
 
 from api.command_service import CommandService
 from api.credentials_service import validate_url
@@ -31,10 +30,19 @@ from api.models import (
     SourceStatusResponse,
     SourceUpdate,
 )
-from commands.source_commands import SourceProcessingInput
+from api.source_intake_service import (
+    create_queued_source,
+    default_transformation_ids,
+    queue_source_processing,
+    source_to_response,
+)
+from open_notebook.application.sources import (
+    command_fields_from_row,
+    status_message_for_source,
+)
 from open_notebook.config import UPLOADS_FOLDER
 from open_notebook.database.repository import ensure_record_id, repo_query
-from open_notebook.domain.notebook import Asset, Notebook, Source
+from open_notebook.domain.notebook import Notebook, Source
 from open_notebook.domain.transformation import Transformation
 from open_notebook.exceptions import (
     InvalidInputError,
@@ -100,6 +108,19 @@ SOURCE_TYPE_EXPRESSION = (
     "IF asset.file_path != NONE THEN 'file' "
     "ELSE IF asset.url != NONE THEN 'link' ELSE 'text' END"
 )
+
+
+async def _embedded_chunks(source: Source) -> int:
+    """Chunk count for the embedded indicator, backend-aware (ADR-016)."""
+    from open_notebook.vectorstore import count_source_points, qdrant_enabled
+
+    if qdrant_enabled():
+        try:
+            return await count_source_points(str(source.id))
+        except Exception as count_error:
+            logger.warning(f"Qdrant chunk count failed for {source.id}: {count_error}")
+            return 0
+    return await source.get_embedded_chunks()
 
 
 async def _stamp_source_view(source_id: str) -> None:
@@ -191,9 +212,9 @@ def parse_source_form_data(
     content: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
     transformations: Optional[str] = Form(None),  # JSON string of transformation IDs
-    embed: str = Form("false"),  # Accept as string, convert to bool
+    embed: str = Form("true"),  # Default on: unembedded sources are invisible to search
     delete_source: str = Form("false"),  # Accept as string, convert to bool
-    async_processing: str = Form("false"),  # Accept as string, convert to bool
+    async_processing: str = Form("false"),  # Accepted for request compatibility
     file: Optional[UploadFile] = File(None),
 ) -> tuple[SourceCreate, Optional[UploadFile]]:
     """Parse form data into SourceCreate model and return upload file separately."""
@@ -316,36 +337,29 @@ async def get_sources(
         """
         result = await repo_query(query, params)
 
-        # Convert result to response model
-        # Command data is already fetched via FETCH command clause
+        # ADR-016: in qdrant mode the source_embedding table is empty, so the
+        # SQL "embedded" flag reads false for everything. Overlay the truth
+        # from one facet call. (Sorting BY embedded degrades to the secondary
+        # order in this mode — the SQL sort key is uniformly false.)
+        from open_notebook.vectorstore import facet_source_counts, qdrant_enabled
+
+        embedded_overlay: dict[str, int] = {}
+        if qdrant_enabled():
+            try:
+                embedded_overlay = await facet_source_counts()
+            except Exception as facet_error:
+                logger.warning(f"Qdrant facet for embedded flags failed: {facet_error}")
+
         response_list = []
         for row in result:
-            command = row.get("command")
-            command_id = None
-            status = None
-            processing_info = None
-
-            # Extract status from fetched command object (already resolved by FETCH)
-            if command and isinstance(command, dict):
-                command_id = str(command.get("id")) if command.get("id") else None
-                status = command.get("status")
-                # Extract execution metadata from nested result structure
-                result_data = command.get("result")
-                execution_metadata = (
-                    result_data.get("execution_metadata", {})
-                    if isinstance(result_data, dict)
-                    else {}
+            if embedded_overlay:
+                row["embedded"] = (
+                    bool(row.get("embedded"))
+                    or embedded_overlay.get(str(row["id"]), 0) > 0
                 )
-                processing_info = {
-                    "started_at": execution_metadata.get("started_at"),
-                    "completed_at": execution_metadata.get("completed_at"),
-                    "error": _truncate_error(command.get("error_message")),
-                }
-            elif command:
-                # Command exists but FETCH failed to resolve it (broken reference)
-                command_id = str(command)
-                status = "unknown"
-
+            command_id, status, processing_info = command_fields_from_row(
+                row.get("command")
+            )
             response_list.append(
                 SourceListResponse(
                     id=row["id"],
@@ -364,7 +378,6 @@ async def get_sources(
                     insights_count=row.get("insights_count", 0),
                     created=str(row["created"]),
                     updated=str(row["updated"]),
-                    # Status fields from fetched command
                     command_id=command_id,
                     status=status,
                     processing_info=processing_info,
@@ -379,35 +392,6 @@ async def get_sources(
     except Exception as e:
         logger.error(f"Error fetching sources: {str(e)}")
         raise HTTPException(status_code=500, detail="Error fetching sources")
-
-
-def _source_to_response(
-    source: Source, embedded_chunks: int = 0, **extras: Any
-) -> SourceResponse:
-    """Build a SourceResponse from a Source, deriving the shared fields.
-
-    Endpoint-specific fields (command_id, status, processing_info, notebooks,
-    file_available, ...) are passed as keyword arguments and override the
-    derived values.
-    """
-    fields: dict[str, Any] = {
-        "id": source.id or "",
-        "title": source.title,
-        "topics": source.topics or [],
-        "asset": AssetModel(
-            file_path=source.asset.file_path,
-            url=source.asset.url,
-        )
-        if source.asset
-        else None,
-        "full_text": source.full_text,
-        "embedded": embedded_chunks > 0,
-        "embedded_chunks": embedded_chunks,
-        "created": str(source.created),
-        "updated": str(source.updated),
-    }
-    fields.update(extras)
-    return SourceResponse(**fields)
 
 
 def _cleanup_uploaded_file(
@@ -476,166 +460,6 @@ async def _build_content_state(
     return content_state
 
 
-async def _create_source_async_path(
-    source_data: SourceCreate,
-    content_state: dict[str, Any],
-    transformation_ids: List[str],
-    file_path: Optional[str],
-) -> SourceResponse:
-    """ASYNC PATH: Create source record first, then queue command."""
-    logger.info("Using async processing path")
-
-    # Create source record with asset - let SurrealDB generate the ID
-    # Persist asset before save so it's available for retry if processing fails
-    if source_data.type == "link":
-        source_asset = Asset(url=source_data.url)
-    elif source_data.type == "upload":
-        source_asset = Asset(file_path=file_path or source_data.file_path)
-    else:
-        source_asset = None
-
-    source = Source(
-        title=source_data.title or "Processing...",
-        topics=[],
-        asset=source_asset,
-    )
-    await source.save()
-
-    # Add source to notebooks immediately so it appears in the UI
-    # The source_graph will skip adding duplicates
-    for notebook_id in source_data.notebooks or []:
-        await source.add_to_notebook(notebook_id)
-
-    try:
-        # Import command modules to ensure they're registered
-        import commands.source_commands  # noqa: F401
-
-        # Submit command for background processing
-        command_input = SourceProcessingInput(
-            source_id=str(source.id),
-            content_state=content_state,
-            notebook_ids=source_data.notebooks,
-            transformations=transformation_ids,
-            embed=source_data.embed,
-        )
-
-        command_id = await CommandService.submit_command_job(
-            "open_notebook",  # app name
-            "process_source",  # command name
-            command_input.model_dump(),
-        )
-
-        logger.info(f"Submitted async processing command: {command_id}")
-
-        # Update source with command reference immediately
-        # command_id already includes 'command:' prefix
-        source.command = ensure_record_id(command_id)
-        await source.save()
-
-        # Return source with command info
-        return _source_to_response(
-            source,
-            asset=None,  # Will be populated after processing
-            full_text=None,  # Will be populated after processing
-            embedded=False,  # Will be updated after processing
-            embedded_chunks=0,
-            command_id=command_id,
-            status="new",
-            processing_info={"async": True, "queued": True},
-        )
-
-    except (HTTPException, OpenNotebookError):
-        # Clean up source record before the error propagates (typed domain
-        # errors are mapped by the global handlers in api/main.py)
-        try:
-            await source.delete()
-        except Exception:
-            pass
-        raise
-    except Exception as e:
-        logger.error(f"Failed to submit async processing command: {e}")
-        # Clean up source record on command submission failure
-        try:
-            await source.delete()
-        except Exception:
-            pass
-        # The uploaded file (if any) is cleaned up by create_source's handlers
-        raise HTTPException(status_code=500, detail="Failed to queue processing")
-
-
-async def _create_source_sync_path(
-    source_data: SourceCreate,
-    content_state: dict[str, Any],
-    transformation_ids: List[str],
-) -> SourceResponse:
-    """SYNC PATH: Execute synchronously using execute_command_sync."""
-    logger.info("Using sync processing path")
-
-    try:
-        # Import command modules to ensure they're registered
-        import commands.source_commands  # noqa: F401
-
-        # Create source record - let SurrealDB generate the ID
-        source = Source(
-            title=source_data.title or "Processing...",
-            topics=[],
-        )
-        await source.save()
-
-        # Add source to notebooks immediately so it appears in the UI
-        # The source_graph will skip adding duplicates
-        for notebook_id in source_data.notebooks or []:
-            await source.add_to_notebook(notebook_id)
-
-        # Execute command synchronously
-        command_input = SourceProcessingInput(
-            source_id=str(source.id),
-            content_state=content_state,
-            notebook_ids=source_data.notebooks,
-            transformations=transformation_ids,
-            embed=source_data.embed,
-        )
-
-        # Run in thread pool to avoid blocking the event loop
-        # execute_command_sync uses asyncio.run() internally which can't
-        # be called from an already-running event loop (FastAPI)
-        result = await asyncio.to_thread(
-            execute_command_sync,
-            "open_notebook",  # app name
-            "process_source",  # command name
-            command_input.model_dump(),
-            timeout=300,  # 5 minute timeout for sync processing
-        )
-
-        if not result.is_success():
-            logger.error(f"Sync processing failed: {result.error_message}")
-            # Clean up source record
-            try:
-                await source.delete()
-            except Exception:
-                pass
-            raise HTTPException(
-                status_code=500,
-                detail=f"Processing failed: {_truncate_error(result.error_message)}",
-            )
-
-        # Get the processed source
-        if not source.id:
-            raise HTTPException(status_code=500, detail="Source ID is missing")
-        processed_source = await Source.get(source.id)
-        if not processed_source:
-            raise HTTPException(status_code=500, detail="Processed source not found")
-
-        embedded_chunks = await processed_source.get_embedded_chunks()
-        # No command_id or status for sync processing (legacy behavior)
-        return _source_to_response(processed_source, embedded_chunks=embedded_chunks)
-
-    except Exception as e:
-        logger.error(f"Sync processing failed: {e}")
-        # The uploaded file (if any) is cleaned up by create_source's handlers
-        raise
-
-
 @router.post("/sources", response_model=SourceResponse)
 async def create_source(
     form_data: tuple[SourceCreate, Optional[UploadFile]] = Depends(
@@ -668,22 +492,25 @@ async def create_source(
         # Prepare content_state for processing (type validation + SSRF/LFI guards)
         content_state = await _build_content_state(source_data, file_path)
 
-        # Validate transformations exist
+        # Validate transformations exist; when the caller specifies none,
+        # honor the apply_default toggle so API/bulk ingests behave like the UI
         transformation_ids = source_data.transformations or []
-        for trans_id in transformation_ids:
-            transformation = await Transformation.get(trans_id)
-            if not transformation:
-                raise HTTPException(
-                    status_code=404, detail=f"Transformation {trans_id} not found"
-                )
+        if transformation_ids:
+            for trans_id in transformation_ids:
+                transformation = await Transformation.get(trans_id)
+                if not transformation:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Transformation {trans_id} not found",
+                    )
+        else:
+            transformation_ids = await default_transformation_ids()
 
-        # Branch based on processing mode
-        if source_data.async_processing:
-            return await _create_source_async_path(
-                source_data, content_state, transformation_ids, file_path
-            )
-        return await _create_source_sync_path(
-            source_data, content_state, transformation_ids
+        return await create_queued_source(
+            source_data,
+            content_state=content_state,
+            transformation_ids=transformation_ids,
+            file_path=file_path,
         )
 
     except HTTPException:
@@ -773,7 +600,7 @@ async def get_source(source_id: str):
                 logger.warning(f"Failed to get status for source {source_id}: {e}")
                 status = "unknown"
 
-        embedded_chunks = await source.get_embedded_chunks()
+        embedded_chunks = await _embedded_chunks(source)
 
         # Get associated notebooks
         notebooks_query = await repo_query(
@@ -784,7 +611,7 @@ async def get_source(source_id: str):
             [str(nb_id) for nb_id in notebooks_query] if notebooks_query else []
         )
 
-        return _source_to_response(
+        return source_to_response(
             source,
             embedded_chunks=embedded_chunks,
             file_available=_is_source_file_available(source),
@@ -853,29 +680,15 @@ async def get_source_status(source_id: str):
         if not source.command:
             return SourceStatusResponse(
                 status=None,
-                message="Legacy source (completed before async processing)",
+                message=status_message_for_source(None),
                 processing_info=None,
                 command_id=None,
             )
 
-        # Get command status and processing info
         try:
             status = await source.get_status()
             processing_info = await source.get_processing_progress()
-
-            # Generate descriptive message based on status
-            if status == "completed":
-                message = "Source processing completed successfully"
-            elif status == "failed":
-                message = "Source processing failed"
-            elif status == "running":
-                message = "Source processing in progress"
-            elif status == "queued":
-                message = "Source processing queued"
-            elif status == "unknown":
-                message = "Source processing status unknown"
-            else:
-                message = f"Source processing status: {status}"
+            message = status_message_for_source(status, processing_info)
 
             return SourceStatusResponse(
                 status=status,
@@ -918,8 +731,8 @@ async def update_source(source_id: str, source_update: SourceUpdate):
 
         await source.save()
 
-        embedded_chunks = await source.get_embedded_chunks()
-        return _source_to_response(source, embedded_chunks=embedded_chunks)
+        embedded_chunks = await _embedded_chunks(source)
+        return source_to_response(source, embedded_chunks=embedded_chunks)
     except HTTPException:
         raise
     except InvalidInputError as e:
@@ -996,38 +809,19 @@ async def retry_source_processing(source_id: str):
                 )
 
         try:
-            # Import command modules to ensure they're registered
-            import commands.source_commands  # noqa: F401
-
-            # Submit new command for background processing
-            command_input = SourceProcessingInput(
-                source_id=str(source.id),
+            command_id = await queue_source_processing(
+                source,
                 content_state=content_state,
                 notebook_ids=notebook_ids,
                 transformations=[],  # Use default transformations on retry
                 embed=True,  # Always embed on retry
             )
 
-            command_id = await CommandService.submit_command_job(
-                "open_notebook",  # app name
-                "process_source",  # command name
-                command_input.model_dump(),
-            )
-
-            logger.info(
-                f"Submitted retry processing command: {command_id} for source {source_id}"
-            )
-
-            # Update source with new command ID
-            # command_id already includes 'command:' prefix
-            source.command = ensure_record_id(command_id)
-            await source.save()
-
             # Get current embedded chunks count
-            embedded_chunks = await source.get_embedded_chunks()
+            embedded_chunks = await _embedded_chunks(source)
 
             # Return updated source response
-            return _source_to_response(
+            return source_to_response(
                 source,
                 embedded_chunks=embedded_chunks,
                 command_id=command_id,
@@ -1059,6 +853,24 @@ async def delete_source(source_id: str):
         source = await Source.get(source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+
+        canonical_id = str(source.id or source_id)
+        from open_notebook.vectorstore import delete_source_points, qdrant_enabled
+
+        if qdrant_enabled():
+            # Qdrant stores chunk text as well as vectors. Clean it before the
+            # database record so an outage cannot strand source content in a
+            # second system while the API reports a successful deletion.
+            try:
+                await delete_source_points(canonical_id)
+            except Exception as cleanup_error:
+                logger.error(
+                    f"Qdrant cleanup failed for {canonical_id}: {cleanup_error}"
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="Vector cleanup failed; source was not deleted",
+                ) from cleanup_error
 
         await source.delete()
 
@@ -1125,8 +937,8 @@ async def create_source_insight(source_id: str, request: CreateSourceInsightRequ
         if not transformation:
             raise HTTPException(status_code=404, detail="Transformation not found")
 
-        # Submit transformation as background job (fire-and-forget)
-        command_id = submit_command(
+        # Submit transformation as background job via CommandService (#1610).
+        command_id = await CommandService.submit_command_job(
             "open_notebook",
             "run_transformation",
             {

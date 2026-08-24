@@ -52,22 +52,19 @@ class TransformationState(TypedDict):
 
 
 def _usable_engine(engine: str, kind: str) -> str:
-    """Return ``engine``, or "auto" when its opt-in runtime is not installed.
+    """Return ``engine``, or "auto" when its runtime is unavailable.
 
-    The engine choice is persisted in the database; runtime availability comes
-    from environment flags that are re-evaluated on every boot. A redeploy that
-    drops OPEN_NOTEBOOK_ENABLE_CRAWL4AI/_DOCLING (or a failed on-demand install)
-    therefore leaves a stored selection pointing at an absent runtime, and
-    passing it through fails every extraction with no usable diagnostic. Falling
-    back to content-core's "auto" chain keeps ingestion working, loudly.
+    A stored selection can outlive an image or remote-service configuration.
+    Falling back to content-core's ``auto`` chain keeps ingestion working and
+    emits an actionable diagnostic.
     """
-    missing_env_var = engine_runtime_missing(engine)
-    if missing_env_var is None:
+    remediation = engine_runtime_missing(engine)
+    if remediation is None:
         return engine
     logger.warning(
         f"Configured {kind} engine '{engine}' is selected in Content Settings but "
         f"its runtime is not available in this container; falling back to 'auto'. "
-        f"Set {missing_env_var}=true to enable it (see ADR-007)."
+        f"To enable it, {remediation}."
     )
     return "auto"
 

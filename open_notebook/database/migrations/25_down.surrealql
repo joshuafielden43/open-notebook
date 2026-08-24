@@ -1,0 +1,5 @@
+-- Migration 25 down: no-op reverse. Restoring the exact prior text would
+-- require distinguishing the migration-24 append from the hand-authored
+-- solo_expert sentence, which we do not track. Leaving profiles as-is is
+-- non-destructive; operators can re-add budgets manually if needed.
+SELECT * FROM episode_profile LIMIT 1;

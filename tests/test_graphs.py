@@ -438,9 +438,8 @@ class TestContentProcessDeleteSource:
         """A stored engine whose runtime is absent must not reach content-core.
 
         The selection is persisted in the database while runtime availability
-        comes from environment flags, so a redeploy that drops
-        OPEN_NOTEBOOK_ENABLE_CRAWL4AI leaves the setting pointing at a runtime
-        that is not installed. Passing it through failed every URL ingestion
+        comes from the image or a remote service, so a redeploy can leave the
+        setting pointing at a runtime that is not available. Passing it through failed every URL ingestion
         with "Could not extract any text content from this source" and no clue
         as to why; the extraction must degrade to content-core's "auto" chain
         instead.
@@ -475,8 +474,8 @@ class TestContentProcessDeleteSource:
         with patch(
             "open_notebook.graphs.source.engine_runtime_missing",
             side_effect=lambda engine: {
-                "crawl4ai": "OPEN_NOTEBOOK_ENABLE_CRAWL4AI",
-                "docling": "OPEN_NOTEBOOK_ENABLE_DOCLING",
+                "crawl4ai": "configure CRAWL4AI_API_URL",
+                "docling": "use the fork image with Docling baked in",
             }.get(engine),
         ):
             await content_process(cast(SourceState, state))

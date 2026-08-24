@@ -1,0 +1,26 @@
+-- Migration 25: strip auto-appended and stock word-budget sentences.
+-- Migration 24 appended "Aim for 800 to 1400 words total across the whole
+-- episode." to stock briefings; the solo_expert stock briefing also carries a
+-- hand-authored "Aim for 700 to 900 words total across the whole episode."
+-- sentence. Both are now gone: the word-budget quality gate has been retired
+-- (open_notebook/podcasts/quality.py) because the retry loop was strangling
+-- episode length by asymmetrically rejecting only over-budget attempts.
+-- SurrealQL string::replace is literal-only, so strip each known variant.
+
+UPDATE episode_profile SET
+    default_briefing = string::replace(
+        default_briefing,
+        " Aim for 800 to 1400 words total across the whole episode.",
+        ""
+    )
+WHERE name IN ["tech_discussion", "solo_expert", "business_panel"]
+    AND string::contains(default_briefing, "Aim for 800 to 1400 words total across the whole episode.");
+
+UPDATE episode_profile SET
+    default_briefing = string::replace(
+        default_briefing,
+        "- Aim for 700 to 900 words total across the whole episode. Cut secondary examples before repeating a point.\n",
+        ""
+    )
+WHERE name IN ["tech_discussion", "solo_expert", "business_panel"]
+    AND string::contains(default_briefing, "Aim for 700 to 900 words total across the whole episode.");

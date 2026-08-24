@@ -1,0 +1,16 @@
+-- Migration 24: word budgets on stock episode briefings + clamp segments to 10
+-- ADR-008 quality gate only enforces word ranges when the briefing contains
+-- an "N to M words" pattern. Seed profiles previously had none, so the
+-- budget path was a no-op for default operators.
+
+UPDATE episode_profile SET
+    default_briefing = string::concat(
+        default_briefing,
+        " Aim for 800 to 1400 words total across the whole episode."
+    )
+WHERE
+    name IN ["tech_discussion", "solo_expert", "business_panel"]
+    AND !string::contains(default_briefing, "words total");
+
+-- podcast-creator rejects num_segments > 10; clamp any profile that drifted.
+UPDATE episode_profile SET num_segments = 10 WHERE num_segments > 10;

@@ -1,0 +1,3 @@
+-- Migration 24 down: no-op reverse for briefing appends (non-destructive).
+-- Word-budget suffix left in place; segment clamp is also non-destructive.
+SELECT * FROM episode_profile LIMIT 1;

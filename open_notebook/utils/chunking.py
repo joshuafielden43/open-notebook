@@ -30,86 +30,52 @@ from loguru import logger
 from .token_utils import token_count
 
 
+def _env_int(
+    name: str,
+    default: int,
+    *,
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> int:
+    """Read an int env dial with clamp + one log when non-default."""
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(f"Invalid {name}={raw!r}; using default {default}")
+        return default
+    if minimum is not None and value < minimum:
+        logger.warning(f"{name}={value} below minimum {minimum}; clamping")
+        value = minimum
+    if maximum is not None and value > maximum:
+        logger.warning(f"{name}={value} above maximum {maximum}; clamping")
+        value = maximum
+    if value != default:
+        logger.info(f"Using {name}={value} (default {default})")
+    return value
+
+
 def _get_chunk_size() -> int:
-    """Get chunk size from environment variable or use default."""
-    chunk_size_str = os.getenv("OPEN_NOTEBOOK_CHUNK_SIZE")
-    if chunk_size_str:
-        try:
-            chunk_size = int(chunk_size_str)
-            if chunk_size < 100:
-                logger.warning(
-                    f"OPEN_NOTEBOOK_CHUNK_SIZE ({chunk_size}) is too small. "
-                    f"Using minimum value of 100."
-                )
-                return 100
-            if chunk_size > 8192:
-                logger.warning(
-                    f"OPEN_NOTEBOOK_CHUNK_SIZE ({chunk_size}) is very large. "
-                    f"This may cause issues with some embedding models."
-                )
-            logger.info(f"Using custom chunk size: {chunk_size} tokens")
-            return chunk_size
-        except ValueError:
-            logger.warning(
-                f"Invalid OPEN_NOTEBOOK_CHUNK_SIZE value: '{chunk_size_str}'. "
-                f"Using default: 400"
-            )
-    return 400
+    return _env_int("OPEN_NOTEBOOK_CHUNK_SIZE", 400, minimum=100, maximum=8192)
 
 
 def _get_chunk_overlap(chunk_size: int) -> int:
-    """Get chunk overlap from environment variable or calculate default (15% of chunk size)."""
-    overlap_str = os.getenv("OPEN_NOTEBOOK_CHUNK_OVERLAP")
-    if overlap_str:
-        try:
-            overlap = int(overlap_str)
-            if overlap < 0:
-                logger.warning(
-                    f"OPEN_NOTEBOOK_CHUNK_OVERLAP ({overlap}) cannot be negative. "
-                    f"Using 0."
-                )
-                return 0
-            if overlap >= chunk_size:
-                logger.warning(
-                    f"OPEN_NOTEBOOK_CHUNK_OVERLAP ({overlap}) cannot be >= chunk size ({chunk_size}). "
-                    f"Using 15% of chunk size: {int(chunk_size * 0.15)}"
-                )
-                return int(chunk_size * 0.15)
-            logger.info(f"Using custom chunk overlap: {overlap} tokens")
-            return overlap
-        except ValueError:
-            logger.warning(
-                f"Invalid OPEN_NOTEBOOK_CHUNK_OVERLAP value: '{overlap_str}'. "
-                f"Using default: 15% of chunk size"
-            )
-    return int(chunk_size * 0.15)
+    default = int(chunk_size * 0.15)
+    value = _env_int("OPEN_NOTEBOOK_CHUNK_OVERLAP", default, minimum=0)
+    if value >= chunk_size:
+        logger.warning(
+            f"OPEN_NOTEBOOK_CHUNK_OVERLAP ({value}) >= chunk size ({chunk_size}); "
+            f"using default {default}"
+        )
+        return default
+    return value
 
 
 def _get_min_chunk_size() -> int:
-    """Get minimum chunk size from environment variable or use default.
-
-    Chunks below this token count are dropped. Some splitters (notably the
-    HTML header splitter on complex pages) can emit single-character or
-    punctuation-only chunks that produce useless or null embeddings —
-    llama.cpp's OpenAI-compatible endpoint, for example, returns null vector
-    elements for such inputs and crashes downstream parsing.
-    """
-    raw = os.getenv("OPEN_NOTEBOOK_MIN_CHUNK_SIZE")
-    if raw is None:
-        return 5
-    try:
-        value = int(raw)
-        if value < 0:
-            logger.warning(
-                f"OPEN_NOTEBOOK_MIN_CHUNK_SIZE ({value}) cannot be negative. Using 0."
-            )
-            return 0
-        return value
-    except ValueError:
-        logger.warning(
-            f"Invalid OPEN_NOTEBOOK_MIN_CHUNK_SIZE value: '{raw}'. Using default: 5"
-        )
-        return 5
+    """Minimum chunk size; chunks below this are dropped before embedding."""
+    return _env_int("OPEN_NOTEBOOK_MIN_CHUNK_SIZE", 5, minimum=0)
 
 
 # Constants (computed at import time from environment variables)
@@ -118,8 +84,8 @@ CHUNK_OVERLAP = _get_chunk_overlap(CHUNK_SIZE)
 MIN_CHUNK_SIZE = _get_min_chunk_size()
 HIGH_CONFIDENCE_THRESHOLD = 0.8  # Threshold for heuristics to override extension
 
-logger.debug(
-    f"Chunking configuration: CHUNK_SIZE={CHUNK_SIZE}, "
+logger.info(
+    f"Chunking dials: CHUNK_SIZE={CHUNK_SIZE}, "
     f"CHUNK_OVERLAP={CHUNK_OVERLAP}, MIN_CHUNK_SIZE={MIN_CHUNK_SIZE}"
 )
 

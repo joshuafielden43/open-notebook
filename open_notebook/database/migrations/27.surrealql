@@ -1,0 +1,6 @@
+-- Migration 27: scope generated episodes to a notebook when known.
+-- notebook_id was only used at submit to assemble context; the durable
+-- episode row forgot it, so outputs could not be listed per notebook.
+
+DEFINE FIELD IF NOT EXISTS notebook ON TABLE episode TYPE option<record<notebook>>;
+DEFINE INDEX IF NOT EXISTS idx_episode_notebook ON TABLE episode COLUMNS notebook CONCURRENTLY;

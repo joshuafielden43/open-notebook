@@ -1,0 +1,3 @@
+-- Migration 27 rollback
+REMOVE INDEX IF EXISTS idx_episode_notebook ON TABLE episode;
+REMOVE FIELD IF EXISTS notebook ON TABLE episode;

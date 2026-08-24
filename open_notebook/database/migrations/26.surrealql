@@ -1,0 +1,8 @@
+-- Migration 26: bump stock profile num_segments to 5.
+-- Three segments gives the outline no room to develop a topic (frame,
+-- complications, landing). Five gives room for depth without asking the
+-- transcript LLM to pad.
+
+UPDATE episode_profile SET num_segments = 5
+WHERE name IN ["tech_discussion", "solo_expert", "business_panel"]
+    AND num_segments != 5;

@@ -27,7 +27,7 @@ class TestAsyncSourceAssetPersistence:
     """
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.CommandService.submit_command_job", new_callable=AsyncMock)
+    @patch("api.command_service.CommandService.submit_command_job", new_callable=AsyncMock)
     @patch("api.routers.sources.Source.add_to_notebook", new_callable=AsyncMock)
     @patch("api.routers.sources.Notebook.get", new_callable=AsyncMock)
     async def test_async_link_source_persists_url_asset(
@@ -64,7 +64,7 @@ class TestAsyncSourceAssetPersistence:
         assert source.asset.file_path is None
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.CommandService.submit_command_job", new_callable=AsyncMock)
+    @patch("api.command_service.CommandService.submit_command_job", new_callable=AsyncMock)
     @patch("api.routers.sources.Source.add_to_notebook", new_callable=AsyncMock)
     @patch("api.routers.sources.Notebook.get", new_callable=AsyncMock)
     @patch("api.routers.sources.save_uploaded_file", new_callable=AsyncMock)
@@ -103,7 +103,7 @@ class TestAsyncSourceAssetPersistence:
         assert source.asset.url is None
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.CommandService.submit_command_job", new_callable=AsyncMock)
+    @patch("api.command_service.CommandService.submit_command_job", new_callable=AsyncMock)
     @patch("api.routers.sources.Source.add_to_notebook", new_callable=AsyncMock)
     @patch("api.routers.sources.Notebook.get", new_callable=AsyncMock)
     async def test_async_text_source_has_no_asset(
@@ -138,12 +138,39 @@ class TestAsyncSourceAssetPersistence:
         assert source.asset is None
 
 
+class TestSourceIntakeQueueing:
+    """POST /sources always returns a queued command."""
+
+    @pytest.mark.parametrize("async_processing", [None, "false"])
+    @patch("api.command_service.CommandService.submit_command_job", new_callable=AsyncMock)
+    def test_create_always_queues_source_processing(
+        self, mock_submit, client, async_processing
+    ):
+        """POST /sources queues work even for the legacy synchronous request mode."""
+        mock_submit.return_value = "command:123"
+
+        async def capture_save(source):
+            source.id = "source:created"
+
+        data = {"type": "text", "content": "A source"}
+        if async_processing is not None:
+            data["async_processing"] = async_processing
+
+        with patch.object(Source, "save", autospec=True, side_effect=capture_save):
+            response = client.post("/api/sources", data=data)
+
+        assert response.status_code == 200
+        assert response.json()["command_id"] == "command:123"
+        assert response.json()["status"] == "queued"
+        mock_submit.assert_awaited_once()
+
+
 class TestRetrySourceProcessing:
     """POST /sources/{id}/retry must find a source's notebooks via the reference
     edge's in/out columns, not a non-existent `source` column (#861)."""
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.CommandService.submit_command_job", new_callable=AsyncMock)
+    @patch("api.command_service.CommandService.submit_command_job", new_callable=AsyncMock)
     @patch("api.routers.sources.repo_query", new_callable=AsyncMock)
     @patch("api.routers.sources.Source.get", new_callable=AsyncMock)
     async def test_retry_finds_notebooks_and_requeues(
@@ -178,6 +205,8 @@ class TestRetrySourceProcessing:
         assert "command:command" not in str(source.command)
         assert str(source.command).count("command:") == 1
         assert str(source.command).startswith("command:")
+        assert response.json()["command_id"] == "command:123"
+        assert response.json()["processing_info"] == {"retry": True, "queued": True}
 
     @pytest.mark.asyncio
     @patch("api.routers.sources.repo_query", new_callable=AsyncMock)

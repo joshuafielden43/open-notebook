@@ -1,0 +1,4 @@
+REMOVE INDEX IF EXISTS idx_reference_in ON reference;
+REMOVE INDEX IF EXISTS idx_reference_out ON reference;
+REMOVE INDEX IF EXISTS idx_artifact_in ON artifact;
+REMOVE INDEX IF EXISTS idx_artifact_out ON artifact;

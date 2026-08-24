@@ -64,8 +64,8 @@ class TestMeanPoolEmbeddings:
         assert len(result) == 4
         # Result should be same direction, just normalized
         # Original is already normalized if we normalize it
-        import numpy as np
-        orig_norm = np.linalg.norm(embedding)
+        import math
+        orig_norm = math.sqrt(sum(v * v for v in embedding))
         expected = [v / orig_norm for v in embedding]
         for i in range(4):
             assert abs(result[i] - expected[i]) < 0.001
@@ -85,25 +85,25 @@ class TestMeanPoolEmbeddings:
         ]
         result = await mean_pool_embeddings(embeddings)
         # Check result is unit length
-        import numpy as np
-        norm = np.linalg.norm(result)
+        import math
+        norm = math.sqrt(sum(v * v for v in result))
         assert abs(norm - 1.0) < 0.001
 
     @pytest.mark.asyncio
     async def test_high_dimensional(self):
         """Test mean pooling with high-dimensional embeddings."""
-        import numpy as np
+        import random
         # Create random embeddings of dimension 768 (typical embedding size)
-        np.random.seed(42)
+        rng = random.Random(42)
         embeddings = [
-            np.random.randn(768).tolist(),
-            np.random.randn(768).tolist(),
-            np.random.randn(768).tolist(),
+            [rng.gauss(0, 1) for _ in range(768)]
+            for _ in range(3)
         ]
         result = await mean_pool_embeddings(embeddings)
         assert len(result) == 768
         # Check result is normalized
-        norm = np.linalg.norm(result)
+        import math
+        norm = math.sqrt(sum(v * v for v in result))
         assert abs(norm - 1.0) < 0.001
 
 
@@ -152,6 +152,45 @@ class TestGenerateEmbeddings:
             assert result[0] == [0.1, 0.2, 0.3]
             assert result[1] == [0.4, 0.5, 0.6]
             mock_model.aembed.assert_called_once_with(["text1", "text2"])
+
+    @pytest.mark.asyncio
+    async def test_provider_calls_serialize_across_concurrent_jobs(self):
+        """Concurrent generate_embeddings calls take the provider gate in turn.
+
+        A serial local endpoint answers interleaved requests slower than the
+        same requests in single file, so the gate (default width 1) must keep
+        provider calls from overlapping even when jobs run concurrently.
+        """
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        in_flight = 0
+        max_in_flight = 0
+
+        async def tracking_aembed(batch):
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return [[0.1, 0.2, 0.3]] * len(batch)
+
+        mock_model = MagicMock()
+        mock_model.aembed = AsyncMock(side_effect=tracking_aembed)
+
+        with patch(
+            "open_notebook.ai.models.model_manager.get_embedding_model",
+            new_callable=AsyncMock,
+            return_value=mock_model,
+        ):
+            results = await asyncio.gather(
+                *[generate_embeddings([f"text{i}"]) for i in range(5)]
+            )
+
+        assert all(len(r) == 1 for r in results)
+        assert max_in_flight == 1, (
+            f"provider saw {max_in_flight} concurrent requests; gate must serialize"
+        )
 
 
 # ============================================================================

@@ -1,0 +1,134 @@
+name: Private Upstream Reconciliation
+
+on:
+  schedule:
+    # Daily at 08:00 America/Los_Angeles. GitHub evaluates the timezone here,
+    # so daylight-saving changes do not shift the operator-facing run time.
+    - cron: '0 8 * * *'
+      timezone: America/Los_Angeles
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: private-upstream-reconciliation
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile and validate private install
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      UPSTREAM_URL: https://github.com/lfnovo/open-notebook.git
+
+    steps:
+      - name: Checkout private install branch
+        uses: actions/checkout@v6
+        with:
+          ref: install
+          fetch-depth: 0
+
+      - name: Verify private standalone boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = "joshuafielden43/open-notebook"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.private')" = "true"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.fork')" = "false"
+
+      - name: Fetch private and upstream branches
+        run: |
+          set -euo pipefail
+          git remote add upstream "${UPSTREAM_URL}"
+          git fetch --prune origin main install
+          git fetch --prune upstream main
+
+      - name: Fast-forward private main mirror
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor origin/main upstream/main; then
+            git push origin upstream/main:main
+          else
+            echo "::error::private/main diverged from upstream/main; refusing to rewrite it"
+            git rev-list --left-right --count origin/main...upstream/main
+            exit 1
+          fi
+
+      - name: Merge upstream into install
+        id: merge
+        run: |
+          set -euo pipefail
+          git checkout -B install origin/install
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          git config user.name "Open Notebook private sync"
+          git config user.email "actions@users.noreply.github.com"
+          git merge --no-ff --no-edit upstream/main
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up uv
+        if: steps.merge.outputs.changed == 'true'
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        if: steps.merge.outputs.changed == 'true'
+        run: uv python install
+
+      - name: Install backend dependencies
+        if: steps.merge.outputs.changed == 'true'
+        run: uv sync --frozen
+
+      - name: Install ffmpeg
+        if: steps.merge.outputs.changed == 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Validate backend
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          uv run ruff check .
+          uv run python -m mypy .
+          uv run pytest -q tests/
+
+      - name: Set up Node.js
+        if: steps.merge.outputs.changed == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Validate frontend
+        if: steps.merge.outputs.changed == 'true'
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run test -- --run
+          npm run build
+
+      - name: Publish tested install merge
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git push origin HEAD:install
+          git fetch origin install
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/install)"
+
+      - name: Reconciliation receipt
+        run: |
+          {
+            echo "### Private upstream reconciliation"
+            echo "- upstream/main: $(git rev-parse upstream/main)"
+            echo "- private/main: $(git rev-parse origin/main)"
+            echo "- private/install: $(git rev-parse origin/install)"
+            echo "- install changed: ${{ steps.merge.outputs.changed }}"
+          } >> "${GITHUB_STEP_SUMMARY}"

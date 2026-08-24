@@ -31,36 +31,21 @@ Please create an outline based on this briefing. Your outline should consist of 
 1. Read the briefing carefully and identify the main topics and themes.
 2. Create {{ num_segments }} distinct segments that cover the entire scope of the briefing.
 3. For each segment, provide a clear and concise name that reflects its content.
-4. Write a detailed description for each segment, explaining what will be discussed and provide suggestions of topics according to the context given. The writer will use your suggestion to design the dialogs.
-5. Consider the speaker personalities and backstories when planning segments - match content to speaker expertise.
+4. Write a detailed description for each segment, explaining what will be discussed and what the writer should focus on. Describe substance and stakes — not a required number of back-and-forth turns.
+5. Consider the speaker personalities and backstories when planning segments - match content to speaker expertise. Allow monologue, dialogue, or mixed forms as the briefing implies.
 6. Ensure that the segments flow logically from one to the next.
 7. This is a whole podcast so no need to reintroduce speakers or topics on each segment. Segments are just markers for us to know to change the topics, nothing else.
-8. Include an introduction segment at the beginning and a conclusion or wrap-up segment at the end.
+8. Segment 1 establishes the topic — the subject, the situation, and why it matters — before any development. Do NOT create a ceremonial "introduction" segment (no host self-introductions, sponsor pitches, or "today we'll cover X, Y, and Z" previews) unless the briefing explicitly asks for one. Include a conclusion or wrap-up segment at the end only when the briefing wants one.
+9. Write each segment description as substance: what specifically will be covered, what tension or claim it advances, what the reader should walk away understanding. Do NOT write descriptions as opening-move instructions (avoid formulas like "Open on X…", "Start with X…", "Kick off with X…"). Describe the content, not the rhetorical entry.
+10. Give the segments an arc, not a flat list: earlier segments establish and frame; middle segments deepen, complicate, or push against the frame; the last segment lands the point. Each segment description should say what specifically develops from the previous one, not just name a new sub-topic.
+11. The size field (short / medium / long) is a relative importance hint for the writer, NOT a turn quota and NOT a request for more ping-pong.
 
-Format your outline using the following structure:
+Return one JSON object with a `segments` array.
 
-```json
-{
-    "segments": [
-        {
-            "name": "[Segment Name]",
-            "description": "[Description of the segment content]",
-            "size": "short"
-        },
-        {
-            "name": "[Segment Name]",
-            "description": "[Description of the segment content]",
-            "size": "medium"
-        },
-        {
-            "name": "[Segment Name]",
-            "description": "[Description of the segment content]",
-            "size": "long"
-        },
-    ...
-    ]
-}
-```
+Every segment MUST include these literal keys:
+- `name`: the segment title
+- `description`: the substantive guidance for the transcript writer
+- `size`: exactly `short`, `medium`, or `long`
 
 Formatting instructions:
 {{ format_instructions}}
@@ -69,8 +54,8 @@ Additional tips:
 - Make sure the segment names are catchy and informative.
 - In the descriptions, include key points or questions that will be addressed in each segment.
 - Consider the target audience mentioned in the briefing when crafting your outline.
-- If the briefing mentions a guest, include segments for introducing the guest and featuring their expertise.
-- The size of the segment should be short, medium or long. Think about the content of the segment and how important it is to the episode.
+- If the briefing mentions a guest, include segments for introducing the guest and featuring their expertise when useful.
+- The size of the segment should be short, medium or long based on importance — not based on how many speaker swaps you want.
 
 IMPORTANT OUTPUT FORMAT:
 - If you use extended thinking with <think> tags, put ALL your reasoning inside <think></think> tags

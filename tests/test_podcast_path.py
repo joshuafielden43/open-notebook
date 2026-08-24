@@ -14,7 +14,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from commands.podcast_commands import build_episode_output_dir
-from open_notebook.podcasts.models import EpisodeProfile, _resolve_model_config
+from open_notebook.ai.runtime import resolve_model_config
+from open_notebook.podcasts.models import EpisodeProfile
 
 
 class TestBuildEpisodeOutputDir:
@@ -104,7 +105,7 @@ class TestResolveModelConfigMaxTokens:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            provider, model_name, config = await _resolve_model_config(
+            provider, model_name, config = await resolve_model_config(
                 "model:test", max_tokens=12000
             )
 
@@ -130,7 +131,7 @@ class TestResolveModelConfigMaxTokens:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            _, _, config = await _resolve_model_config("model:test")
+            _, _, config = await resolve_model_config("model:test")
 
         assert "max_tokens" not in config
 
@@ -156,3 +157,32 @@ class TestEpisodeProfileMaxTokens:
         )
 
         assert profile.max_tokens is None
+
+
+class TestCleanupFailedEpisodeDir:
+    def test_removes_contained_tree(self, tmp_path: Path):
+        from commands.podcast_commands import cleanup_failed_episode_dir
+
+        _, output_dir = build_episode_output_dir(str(tmp_path))
+        output_dir.mkdir(parents=True)
+        (output_dir / "clips").mkdir()
+        (output_dir / "clips" / "0000.mp3").write_bytes(b"x")
+
+        assert cleanup_failed_episode_dir(output_dir, podcasts_folder=str(tmp_path))
+        assert not output_dir.exists()
+
+    def test_refuses_escape(self, tmp_path: Path):
+        from commands.podcast_commands import cleanup_failed_episode_dir
+
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        marker = outside / "keep.txt"
+        marker.write_text("keep")
+
+        assert not cleanup_failed_episode_dir(outside, podcasts_folder=str(tmp_path))
+        assert marker.exists()
+
+    def test_none_is_noop(self):
+        from commands.podcast_commands import cleanup_failed_episode_dir
+
+        assert not cleanup_failed_episode_dir(None)

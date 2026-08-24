@@ -5,10 +5,9 @@ This test suite focuses on validation logic, business rules, and data structures
 that can be tested without database mocking.
 """
 
-import sys
 import tempfile
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -26,8 +25,12 @@ from open_notebook.domain.notebook import (
     SourceInsight,
 )
 from open_notebook.domain.transformation import Transformation
-from open_notebook.exceptions import InvalidInputError
-from open_notebook.podcasts.models import EpisodeProfile, SpeakerProfile
+from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
+from open_notebook.podcasts.models import (
+    EpisodeProfile,
+    PodcastEpisode,
+    SpeakerProfile,
+)
 
 # ============================================================================
 # TEST SUITE 1: RecordModel Singleton Pattern
@@ -151,6 +154,53 @@ class TestNotebookDomain:
         assert "## Source: Second Source" in context
         assert "Second source full text for podcast generation." in context
         assert "Notebook(id=" not in context
+
+    @pytest.mark.asyncio
+    async def test_save_raises_when_record_vanished(self):
+        """An UPDATE against a deleted record returns [] — save() must report
+        which record is gone, not raise a bare IndexError."""
+        notebook = Notebook(id="notebook:gone", name="Test", description="Test")
+
+        with patch(
+            "open_notebook.domain.base.repo_update",
+            new=AsyncMock(return_value=[]),
+        ):
+            with pytest.raises(DatabaseOperationError, match="no longer exists"):
+                await notebook.save()
+
+    @pytest.mark.asyncio
+    async def test_notebook_get_context_respects_max_chars(self):
+        """max_chars bounds the context and skips blocks that would overflow."""
+        notebook = Notebook(id="notebook:test", name="Test", description="Test")
+        sources = [
+            Source(id="source:small", title="Small", full_text="x" * 50),
+            Source(id="source:huge", title="Huge", full_text="y" * 5000),
+            Source(id="source:small2", title="Small2", full_text="z" * 50),
+        ]
+
+        async def fake_get_sources(self, include_full_text=False):
+            return sources
+
+        async def fake_get_notes(self, include_content=False):
+            return []
+
+        async def fake_get_for_sources(cls, source_ids):
+            return {sid: [] for sid in source_ids}
+
+        with (
+            patch.object(Notebook, "get_sources", new=fake_get_sources),
+            patch.object(Notebook, "get_notes", new=fake_get_notes),
+            patch.object(
+                SourceInsight, "get_for_sources", new=classmethod(fake_get_for_sources)
+            ),
+        ):
+            context = await notebook.get_context(max_chars=500)
+
+        # The huge source is skipped; the two small ones still fit.
+        assert len(context) <= 500
+        assert "## Source: Small" in context
+        assert "## Source: Small2" in context
+        assert "## Source: Huge" not in context
 
     @pytest.mark.asyncio
     async def test_notebook_get_context_includes_note_content(self):
@@ -493,66 +543,65 @@ class TestPodcastService:
 
     @pytest.mark.asyncio
     async def test_submit_generation_job_uses_notebook_context_content(self):
-        """Test notebook podcast jobs submit real source content, not model repr."""
+        """Notebook podcast jobs pass notebook_id by reference (#1603)."""
         notebook = Notebook(id="notebook:test", name="Test", description="Test")
-        sources = [
-            Source(
-                id="source:first",
-                title="First Source",
-                full_text="First source full text for submitted podcast content.",
-            ),
-            Source(
-                id="source:second",
-                title="Second Source",
-                full_text="Second source full text for submitted podcast content.",
-            ),
-        ]
         submitted_args = {}
 
-        async def fake_get_sources(self, include_full_text=False):
-            return sources
-
-        async def fake_get_notes(self, include_content=False):
-            return []
-
-        async def fake_get_for_sources(cls, source_ids):
-            return {sid: [] for sid in source_ids}
-
-        def fake_submit_command(app_name, command_name, command_args):
+        async def fake_submit_command(app_name, command_name, command_args, context=None):
             submitted_args.update(command_args)
             return "command:podcast"
 
-        fake_commands_module = ModuleType("commands.podcast_commands")
-        # The real commands/__init__.py runs `from .podcast_commands import
-        # generate_podcast_command` when the package is imported, so the fake
-        # submodule must expose that name or the package import fails before the
-        # patched submit_command is reached.
-        # setattr: dynamic module attribute mypy can't know about
-        setattr(fake_commands_module, "generate_podcast_command", lambda *a, **k: None)
+        ready_episode = SimpleNamespace(
+            name="Episode",
+            outline_llm="model:outline",
+            transcript_llm="model:transcript",
+            model_dump=lambda mode="json": {"name": "Episode"},
+        )
+        ready_speaker = SimpleNamespace(
+            id="speaker_profile:speakers",
+            name="Speakers",
+            voice_model="model:tts",
+            speakers=[
+                {
+                    "name": "Host",
+                    "voice_id": "bf_emma",
+                    "backstory": "b",
+                    "personality": "p",
+                }
+            ],
+            model_dump=lambda mode="json": {"name": "Speakers"},
+        )
+
+        async def fake_episode_save(self):
+            if not getattr(self, "id", None):
+                self.id = "episode:stub"
+
+        linked = SimpleNamespace(id="episode:stub", command=None, content="")
+        linked.save = AsyncMock()
 
         with (
             patch.object(
-                EpisodeProfile, "get_by_name", new=AsyncMock(return_value=object())
+                EpisodeProfile,
+                "get_by_name",
+                new=AsyncMock(return_value=ready_episode),
             ),
             patch.object(
                 SpeakerProfile,
-                "get_by_name",
-                new=AsyncMock(
-                    return_value=SimpleNamespace(
-                        id="speaker_profile:speakers", name="Speakers"
-                    )
-                ),
+                "resolve",
+                new=AsyncMock(return_value=ready_speaker),
             ),
             patch.object(Notebook, "get", new=AsyncMock(return_value=notebook)),
-            patch.object(Notebook, "get_sources", new=fake_get_sources),
-            patch.object(Notebook, "get_notes", new=fake_get_notes),
-            patch.object(
-                SourceInsight, "get_for_sources", new=classmethod(fake_get_for_sources)
+            patch(
+                "api.podcast_service.CommandService.submit_command_job",
+                new=fake_submit_command,
             ),
-            patch("api.podcast_service.submit_command", new=fake_submit_command),
-            patch.dict(
-                sys.modules, {"commands.podcast_commands": fake_commands_module}
+            patch.object(PodcastEpisode, "save", fake_episode_save),
+            patch.object(PodcastEpisode, "get", new=AsyncMock(return_value=linked)),
+            patch(
+                "open_notebook.podcasts.orchestration.build_briefing",
+                return_value="brief",
             ),
+            patch.object(PodcastService, "_validate_profiles_ready"),
         ):
             job_id = await PodcastService.submit_generation_job(
                 episode_profile_name="Episode",
@@ -562,10 +611,28 @@ class TestPodcastService:
             )
 
         assert job_id == "command:podcast"
-        content = submitted_args["content"]
-        assert "First source full text for submitted podcast content." in content
-        assert "Second source full text for submitted podcast content." in content
-        assert "Notebook(id=" not in content
+        assert submitted_args.get("notebook_id") == "notebook:test"
+        assert "content" not in submitted_args
+
+    @pytest.mark.asyncio
+    async def test_submit_generation_job_rejects_invalid_context_limit(
+        self, monkeypatch
+    ):
+        """Invalid context configuration must not submit a fake notebook ID."""
+        from open_notebook.exceptions import ConfigurationError
+
+        notebook_get = AsyncMock()
+        monkeypatch.setenv("PODCAST_CONTEXT_MAX_CHARS", "invalid")
+
+        with pytest.raises(ConfigurationError, match="PODCAST_CONTEXT_MAX_CHARS"):
+            await PodcastService.submit_generation_job(
+                episode_profile_name="Episode",
+                speaker_profile_name="Speakers",
+                episode_name="Episode Name",
+                notebook_id="notebook:test",
+            )
+
+        notebook_get.assert_not_awaited()
 
 
 # ============================================================================
@@ -647,10 +714,10 @@ class TestEpisodeProfile:
     """Test suite for EpisodeProfile validation."""
 
     def test_episode_profile_segment_validation(self):
-        """Test segment count validation (3-20)."""
+        """Test segment count validation (3-10, matches podcast-creator)."""
         # Test invalid - too few segments
         with pytest.raises(
-            ValidationError, match="Number of segments must be between 3 and 20"
+            ValidationError, match="Number of segments must be between 3 and 10"
         ):
             EpisodeProfile(
                 name="Test",
@@ -661,7 +728,7 @@ class TestEpisodeProfile:
 
         # Test invalid - too many segments
         with pytest.raises(
-            ValidationError, match="Number of segments must be between 3 and 20"
+            ValidationError, match="Number of segments must be between 3 and 10"
         ):
             EpisodeProfile(
                 name="Test",

@@ -187,12 +187,34 @@ class TestApiBoundaryResolvesNameToRecordId:
     @pytest.mark.asyncio
     async def test_submit_passes_record_id_to_command(self):
         from api.podcast_service import PodcastService
+        from open_notebook.podcasts.models import PodcastEpisode
 
         episode_profile = Mock()
         episode_profile.name = "Deep Dive"
+        episode_profile.outline_llm = "model:outline"
+        episode_profile.transcript_llm = "model:transcript"
+        episode_profile.default_briefing = "brief"
+        episode_profile.model_dump = Mock(return_value={"name": "Deep Dive"})
         speaker_profile = Mock()
         speaker_profile.id = "speaker_profile:abc"
         speaker_profile.name = "Tech Experts"
+        speaker_profile.voice_model = "model:tts"
+        speaker_profile.speakers = [
+            {
+                "name": "Alex",
+                "voice_id": "bf_emma",
+                "backstory": "b",
+                "personality": "p",
+            }
+        ]
+        speaker_profile.model_dump = Mock(return_value={"name": "Tech Experts"})
+
+        async def fake_save(self):
+            if not self.id:
+                self.id = "episode:stub"
+
+        linked = Mock()
+        linked.save = AsyncMock()
 
         with (
             patch(
@@ -203,9 +225,18 @@ class TestApiBoundaryResolvesNameToRecordId:
                 "api.podcast_service.SpeakerProfile.resolve",
                 new=AsyncMock(return_value=speaker_profile),
             ) as mock_resolve,
-            patch("api.podcast_service.submit_command") as mock_submit,
+            patch(
+                "api.podcast_service.CommandService.submit_command_job",
+                new=AsyncMock(return_value="command:job1"),
+            ) as mock_submit,
+            patch.object(PodcastService, "_validate_profiles_ready"),
+            patch.object(PodcastEpisode, "save", fake_save),
+            patch.object(PodcastEpisode, "get", new=AsyncMock(return_value=linked)),
+            patch(
+                "open_notebook.podcasts.orchestration.build_briefing",
+                return_value="brief",
+            ),
         ):
-            mock_submit.return_value = "command:job1"
             job_id = await PodcastService.submit_generation_job(
                 episode_profile_name="Deep Dive",
                 speaker_profile_name="Tech Experts",
@@ -217,6 +248,7 @@ class TestApiBoundaryResolvesNameToRecordId:
         mock_resolve.assert_awaited_once_with("Tech Experts")
         command_args = mock_submit.call_args.args[2]
         assert command_args["speaker_profile"] == "speaker_profile:abc"
+        assert command_args["existing_episode_id"] == "episode:stub"
 
 
 class TestMigration20:
@@ -277,13 +309,12 @@ class TestMigration20:
 
 
 class TestOrphanedProfileDoesNotPoisonConfig:
-    """One orphaned episode profile (speaker_config=None after migration 20)
-    must not fail podcast-creator's validation of the whole episode config,
-    and the profile dicts handed to podcast-creator must carry speaker NAMES
-    (its contract), not record IDs."""
+    """Generation configures only the job's profiles (speaker NAMES), so an
+    orphaned sibling profile in the DB cannot poison podcast-creator validation.
+    """
 
     @pytest.mark.asyncio
-    async def test_orphan_dropped_and_ids_rewritten_to_names(self, tmp_path):
+    async def test_single_job_profiles_use_speaker_names(self, tmp_path):
         episode_profile = EpisodeProfile(
             id="episode_profile:ep1",
             name="Test Episode Profile",
@@ -307,34 +338,37 @@ class TestOrphanedProfileDoesNotPoisonConfig:
             ],
         )
 
-        episode_rows = [
-            {
-                "id": "episode_profile:ep1",
-                "name": "Test Episode Profile",
-                "speaker_config": "speaker_profile:sp1",
-                "default_briefing": "brief",
-                "num_segments": 3,
-            },
-            {
-                # Orphaned by migration 20: referenced speaker no longer exists
-                "id": "episode_profile:ep2",
-                "name": "Orphaned Profile",
-                "speaker_config": None,
-                "default_briefing": "brief",
-                "num_segments": 3,
-            },
-        ]
-        speaker_rows = [{"id": "speaker_profile:sp1", "name": "Tech Experts"}]
-
-        async def fake_repo_query(query, *args, **kwargs):
-            if "episode_profile" in query:
-                return episode_rows
-            return speaker_rows
-
         configure_calls = {}
+        checkpoint_outline = {"segments": [{"name": "Intro"}]}
+        checkpoint_transcript = [{"speaker": "Alex", "dialogue": "Welcome"}]
+        save_mock = AsyncMock()
+        audio_path = tmp_path / "episodes" / "ep-dir" / "out.mp3"
+        audio_path.parent.mkdir(parents=True)
+        audio_path.write_bytes(b"\x01" * 4096)
 
         def fake_configure(key, value):
             configure_calls[key] = value
+
+        async def fake_create_with_quality_retry(
+            *,
+            briefing,
+            create_kwargs,
+            progress_callback=None,
+            configure_profiles=None,
+        ):
+            if configure_profiles:
+                configure_profiles()
+            if progress_callback:
+                await progress_callback("outline", checkpoint_outline)
+                await progress_callback("transcript", checkpoint_transcript)
+            return (
+                {
+                    "final_output_file_path": str(audio_path),
+                    "transcript": checkpoint_transcript,
+                    "outline": checkpoint_outline,
+                },
+                briefing,
+            )
 
         resolved: tuple = ("openai", "model-name", {})
 
@@ -350,55 +384,46 @@ class TestOrphanedProfileDoesNotPoisonConfig:
                 new=AsyncMock(return_value=speaker_profile),
             ),
             patch(
-                "open_notebook.podcasts.models._resolve_model_config",
+                "open_notebook.podcasts.models.resolve_model_config",
                 new=AsyncMock(return_value=resolved),
             ),
             patch(
-                "commands.podcast_commands._resolve_model_config",
+                "open_notebook.podcasts.orchestration.resolve_model_config",
                 new=AsyncMock(return_value=resolved),
             ),
             patch(
-                "commands.podcast_commands.repo_query", new=fake_repo_query
+                "open_notebook.podcasts.episode_generation.configure",
+                new=fake_configure,
             ),
-            patch("commands.podcast_commands.configure", new=fake_configure),
             patch(
-                "commands.podcast_commands.create_podcast",
-                new=AsyncMock(
-                    return_value={
-                        "final_output_file_path": str(
-                            tmp_path / "episodes" / "ep-dir" / "out.mp3"
-                        ),
-                        "transcript": {},
-                        "outline": {},
-                    }
-                ),
+                "open_notebook.podcasts.episode_generation.create_podcast_with_quality_retry",
+                new=fake_create_with_quality_retry,
             ),
-            # audio_file is stored relative to PODCASTS_FOLDER and validated
-            # at write time (#1030), so the fake output path must live under
-            # the (patched) podcasts root.
             patch(
                 "open_notebook.podcasts.audio_paths.PODCASTS_FOLDER",
                 str(tmp_path),
             ),
             patch(
-                "commands.podcast_commands.build_episode_output_dir",
+                "open_notebook.podcasts.episode_generation.build_episode_output_dir",
                 new=lambda *args: ("ep-dir", tmp_path / "ep-dir"),
             ),
             patch(
                 "open_notebook.podcasts.models.PodcastEpisode.save",
-                new=AsyncMock(),
+                new=save_mock,
             ),
         ):
             result = await generate_podcast_command(make_input())
 
         assert result.success is True
-        # The stored/reported audio path is relative to PODCASTS_FOLDER (#1030)
+        # Initial record, outline, transcript, and final audio result.
+        assert save_mock.await_count == 4
         assert result.audio_file_path == "episodes/ep-dir/out.mp3"
         episode_config = configure_calls["episode_config"]["profiles"]
-        # Orphaned profile removed instead of poisoning validation
-        assert "Orphaned Profile" not in episode_config
-        # Record ID rewritten to the speaker profile NAME for podcast-creator
+        # Only the job's profile is configured — orphans never enter the map.
+        assert list(episode_config.keys()) == ["Test Episode Profile"]
         assert (
             episode_config["Test Episode Profile"]["speaker_config"]
             == "Tech Experts"
         )
+        speaker_config = configure_calls["speakers_config"]["profiles"]
+        assert list(speaker_config.keys()) == ["Tech Experts"]

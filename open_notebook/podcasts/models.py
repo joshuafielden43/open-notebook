@@ -4,33 +4,12 @@ from loguru import logger
 from pydantic import ConfigDict, Field, field_validator
 from surrealdb import RecordID
 
+from open_notebook.ai.runtime import resolve_model_config
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.base import ObjectModel
 
-
-async def _resolve_model_config(
-    model_id: str, max_tokens: Optional[int] = None
-) -> Tuple[str, str, dict]:
-    """Load Model record, resolve credential -> (provider, model_name, config_dict).
-
-    Used by resolve_outline_config, resolve_transcript_config, resolve_tts_config,
-    and per-speaker TTS overrides. Optionally passes through a max_tokens override.
-    """
-    from open_notebook.ai.models import Model
-
-    model = await Model.get(model_id)
-    config: dict = {}
-    if model.credential:
-        credential = await model.get_credential_obj()
-        if credential:
-            config = credential.to_esperanto_config()
-    if not config:
-        from open_notebook.ai.key_provider import provision_provider_keys
-
-        await provision_provider_keys(model.provider)
-    if max_tokens is not None:
-        config = {**config, "max_tokens": max_tokens}
-    return (model.provider, model.name, config)
+# Back-compat alias for tests and older imports.
+_resolve_model_config = resolve_model_config
 
 
 class EpisodeProfile(ObjectModel):
@@ -81,8 +60,10 @@ class EpisodeProfile(ObjectModel):
     @field_validator("num_segments")
     @classmethod
     def validate_segments(cls, v):
-        if not 3 <= v <= 20:
-            raise ValueError("Number of segments must be between 3 and 20")
+        # podcast-creator rejects >10 segments; keep the same ceiling here so
+        # a saved profile cannot fail every generation at library validation.
+        if not 3 <= v <= 10:
+            raise ValueError("Number of segments must be between 3 and 10")
         return v
 
     def _prepare_save_data(self) -> dict:
@@ -102,7 +83,9 @@ class EpisodeProfile(ObjectModel):
                 f"Episode profile '{self.name}' has no outline model configured. "
                 "Please update the profile to select an outline model."
             )
-        return await _resolve_model_config(self.outline_llm, max_tokens=self.max_tokens)
+        return await resolve_model_config(
+            self.outline_llm, max_tokens=self.max_tokens
+        )
 
     async def resolve_transcript_config(self) -> Tuple[str, str, dict]:
         """Resolve transcript model -> (provider, model_name, config_dict)"""
@@ -111,7 +94,7 @@ class EpisodeProfile(ObjectModel):
                 f"Episode profile '{self.name}' has no transcript model configured. "
                 "Please update the profile to select a transcript model."
             )
-        return await _resolve_model_config(
+        return await resolve_model_config(
             self.transcript_llm, max_tokens=self.max_tokens
         )
 
@@ -161,6 +144,17 @@ class SpeakerProfile(ObjectModel):
             for field in required_fields:
                 if field not in speaker:
                     raise ValueError(f"Speaker missing required field: {field}")
+            if not str(speaker.get("voice_id") or "").strip():
+                raise ValueError("Speaker voice_id cannot be empty")
+
+        names = [str(speaker.get("name") or "").strip() for speaker in v]
+        if len(names) != len(set(names)):
+            raise ValueError("Speaker names must be unique")
+
+        # podcast-creator requires unique voice IDs across the profile.
+        voice_ids = [str(speaker.get("voice_id") or "").strip() for speaker in v]
+        if len(voice_ids) != len(set(voice_ids)):
+            raise ValueError("Speaker voice_ids must be unique")
         return v
 
     def _prepare_save_data(self) -> dict:
@@ -181,7 +175,7 @@ class SpeakerProfile(ObjectModel):
                 f"Speaker profile '{self.name}' has no voice model configured. "
                 "Please update the profile to select a voice model."
             )
-        return await _resolve_model_config(self.voice_model)
+        return await resolve_model_config(self.voice_model)
 
     @classmethod
     async def get_by_name(cls, name: str) -> Optional["SpeakerProfile"]:
@@ -219,6 +213,13 @@ class PodcastEpisode(ObjectModel):
     """Enhanced PodcastEpisode with job tracking and metadata"""
 
     table_name: ClassVar[str] = "episode"
+    nullable_fields: ClassVar[set[str]] = {
+        "notebook",
+        "audio_file",
+        "transcript",
+        "outline",
+        "command",
+    }
 
     name: str = Field(..., description="Episode name")
     episode_profile: Dict[str, Any] = Field(
@@ -228,7 +229,13 @@ class PodcastEpisode(ObjectModel):
         ..., description="Speaker profile used (stored as object)"
     )
     briefing: str = Field(..., description="Full briefing used for generation")
-    content: str = Field(..., description="Source content")
+    content: str = Field(default="", description="Source content")
+    # notebook record id when generation was started from a notebook; None for
+    # free-form content-only jobs and pre-migration 27 rows.
+    notebook: Optional[Union[str, RecordID]] = Field(
+        default=None,
+        description="Notebook this episode was generated from (if any)",
+    )
     audio_file: Optional[str] = Field(
         default=None,
         description=(
@@ -250,75 +257,302 @@ class PodcastEpisode(ObjectModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    # Optional list-only flags (not persisted) so generation_stage works without
+    # shipping full outline/transcript blobs.
+    has_outline: Optional[bool] = Field(default=None, exclude=True)
+    has_transcript: Optional[bool] = Field(default=None, exclude=True)
+
+    @classmethod
+    async def list_full(
+        cls,
+        order_by: str = "created desc",
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        notebook_id: Optional[str] = None,
+    ) -> List["PodcastEpisode"]:
+        """List full episode rows including outline/transcript (detail=full).
+
+        Same filter/limit surface as list_summary so notebook-scoped polls get
+        mid-run outline/transcript the same way the global list does.
+        """
+        validated = cls._validate_order_by(order_by)
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        where = ""
+        params: Dict[str, Any] = {}
+        if notebook_id:
+            where = "WHERE notebook = $notebook "
+            params["notebook"] = ensure_record_id(notebook_id)
+        query = (
+            f"SELECT * FROM {cls.table_name} {where}ORDER BY {validated} "
+            f"LIMIT {limit} START {offset}"
+        )
+        result = await repo_query(query, params)
+        objects: List[PodcastEpisode] = []
+        for obj in result or []:
+            try:
+                objects.append(cls(**obj))
+            except Exception as e:
+                logger.critical(f"Error creating episode full object: {e}")
+        return objects
+
+    @classmethod
+    async def list_summary(
+        cls,
+        order_by: str = "created desc",
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        notebook_id: Optional[str] = None,
+    ) -> List["PodcastEpisode"]:
+        """List episodes without fat content/transcript/outline payloads.
+
+        Used by the episodes list endpoint so the DB does not ship multi-MB
+        blobs just to paint status cards. Projects cheap presence flags for
+        generation_stage without loading the blobs.
+        """
+        validated = cls._validate_order_by(order_by)
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        where = ""
+        params: Dict[str, Any] = {}
+        if notebook_id:
+            where = "WHERE notebook = $notebook "
+            params["notebook"] = ensure_record_id(notebook_id)
+        # Presence flags keep stage UI honest without fat payloads.
+        query = (
+            f"SELECT id, name, episode_profile, speaker_profile, briefing, "
+            f"notebook, audio_file, command, created, updated, "
+            f"(outline != NONE AND outline != {{}}) AS has_outline, "
+            f"(transcript != NONE AND transcript != {{}}) AS has_transcript "
+            f"FROM {cls.table_name} {where}ORDER BY {validated} "
+            f"LIMIT {limit} START {offset}"
+        )
+        try:
+            result = await repo_query(query, params)
+        except Exception as e:
+            # Older Surreal builds may reject the flag expressions; fall back.
+            logger.warning(f"list_summary with flags failed, falling back: {e}")
+            query = (
+                f"SELECT id, name, episode_profile, speaker_profile, briefing, "
+                f"notebook, audio_file, command, created, updated "
+                f"FROM {cls.table_name} {where}ORDER BY {validated} "
+                f"LIMIT {limit} START {offset}"
+            )
+            result = await repo_query(query, params)
+        objects: List[PodcastEpisode] = []
+        for obj in result or []:
+            row = dict(obj)
+            has_outline = row.pop("has_outline", None)
+            has_transcript = row.pop("has_transcript", None)
+            row.setdefault("content", "")
+            row.setdefault("transcript", None)
+            row.setdefault("outline", None)
+            briefing = row.get("briefing") or ""
+            if isinstance(briefing, str) and len(briefing) > 240:
+                row["briefing"] = briefing[:240] + "…"
+            try:
+                episode = cls(**row)
+                episode.has_outline = (
+                    bool(has_outline) if has_outline is not None else None
+                )
+                episode.has_transcript = (
+                    bool(has_transcript) if has_transcript is not None else None
+                )
+                objects.append(episode)
+            except Exception as e:
+                logger.critical(f"Error creating episode summary object: {e}")
+        return objects
+
+    @staticmethod
+    def command_status_key(command_id: Union[str, RecordID, None]) -> Optional[str]:
+        """Canonical map key for command ids (always `command:…` string)."""
+        if not command_id:
+            return None
+        try:
+            return str(ensure_record_id(command_id))
+        except Exception:
+            return str(command_id)
+
+    @staticmethod
+    def _normalize_command_status_detail(detail: dict) -> dict:
+        """Terminal truth for UI: failed jobs must never present as running.
+
+        surreal-commands can leave a non-empty error_message while status is
+        still running in rare failure paths; treat that as failed. Always
+        lower-case the status string so enum-like values compare cleanly.
+        """
+        status = str(detail.get("status") or "unknown").lower()
+        error_message = detail.get("error_message")
+        if error_message is not None:
+            error_message = str(error_message).strip() or None
+        if status in {"running", "processing"} and error_message:
+            status = "failed"
+        return {
+            **detail,
+            "status": status,
+            "error_message": error_message,
+        }
+
     async def get_job_status(self) -> Optional[str]:
         """Get the status of the associated command"""
-        if not self.command:
-            return None
+        detail = await self.get_job_detail()
+        return detail.get("status")
 
+    @classmethod
+    async def claim_for_retry(
+        cls, episode_id: str, expected_command: str
+    ) -> bool:
+        """Compare-and-swap claim so two retries cannot share one episode row.
+
+        Succeeds only when ``episode.command`` still equals the failed command
+        we verified as retryable. Clears the pointer (sets command to NONE) so
+        a concurrent retry sees non-retryable state until the winner links its
+        new job id. Returns True if this caller won the claim (#1608).
+        """
+        if not episode_id or not expected_command:
+            return False
         try:
-            from surreal_commands import get_command_status
+            rows = await repo_query(
+                """
+                UPDATE $id SET
+                    command = NONE,
+                    updated = time::now()
+                WHERE command = $expected
+                RETURN AFTER
+                """,
+                {
+                    "id": ensure_record_id(episode_id),
+                    "expected": ensure_record_id(expected_command),
+                },
+            )
+            return bool(rows)
+        except Exception as e:
+            logger.error(
+                f"Failed to claim episode {episode_id} for retry "
+                f"(expected command {expected_command}): {e}"
+            )
+            return False
 
-            status = await get_command_status(str(self.command))
-            return status.status if status else "unknown"
-        except Exception:
-            return "unknown"
+    @classmethod
+    async def restore_command_link(
+        cls, episode_id: str, command_id: str
+    ) -> None:
+        """Restore the prior command link after a failed retry submit.
+
+        Only writes when command is still NONE (the claimed state) so we never
+        overwrite a newer winner's job id.
+        """
+        if not episode_id or not command_id:
+            return
+        try:
+            await repo_query(
+                """
+                UPDATE $id SET
+                    command = $command,
+                    updated = time::now()
+                WHERE command IS NONE
+                """,
+                {
+                    "id": ensure_record_id(episode_id),
+                    "command": ensure_record_id(command_id),
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                f"Could not restore command {command_id} on episode "
+                f"{episode_id} after failed retry submit: {e}"
+            )
 
     async def get_job_detail(self) -> dict:
-        """Get status and error_message of the associated command"""
+        """Get status and error_message of the associated command.
+
+        Reads the command table directly (same path as the batch list helper)
+        so detail and list cannot disagree on status for the same command id.
+        """
         if not self.command:
-            return {"status": None, "error_message": None}
+            return {"status": None, "error_message": None, "updated": None}
 
         try:
-            from surreal_commands import get_command_status
+            from open_notebook.jobs import (
+                coerce_status_detail,
+                fail_stale_running_commands,
+            )
 
-            status = await get_command_status(str(self.command))
-            if not status:
-                return {"status": "unknown", "error_message": None}
-            return {
-                "status": status.status,
-                "error_message": getattr(status, "error_message", None),
-            }
+            # Opportunistically reaping zombies keeps retry unblocked.
+            try:
+                await fail_stale_running_commands()
+            except Exception as reap_err:
+                logger.warning(f"Stale command reaper skipped: {reap_err}")
+
+            result = await repo_query(
+                "SELECT id, status, error_message, updated FROM command "
+                "WHERE id = $command_id",
+                {"command_id": ensure_record_id(self.command)},
+            )
+            if not result:
+                return {"status": "unknown", "error_message": None, "updated": None}
+            row = result[0]
+            detail = self._normalize_command_status_detail(
+                {
+                    "status": row.get("status", "unknown"),
+                    "error_message": row.get("error_message"),
+                    "updated": str(row.get("updated"))
+                    if row.get("updated") is not None
+                    else None,
+                }
+            )
+            return coerce_status_detail(detail)
         except Exception:
-            return {"status": "unknown", "error_message": None}
+            return {"status": "unknown", "error_message": None, "updated": None}
 
     @classmethod
     async def get_job_details_for_commands(
         cls, command_ids: List[Union[str, RecordID]]
     ) -> Dict[str, dict]:
         """
-        Batch-fetch {status, error_message} for many commands in one query.
+        Batch-fetch {status, error_message, updated} for many commands in one query.
 
-        Listing episodes otherwise calls get_job_detail() -> surreal_commands
-        .get_command_status() once per episode, each its own round trip
-        against the `command` table (no connection pooling in the repository
-        layer, see docs/7-DEVELOPMENT/architecture.md) - O(n) queries for n
-        episodes. surreal_commands has no batch lookup, but its command table
-        lives in the same database (same SURREAL_* env vars), so this queries
-        it directly in one shot instead of looping through the library's
-        per-command helper.
-
-        CommandStatus is a `str` subclass (`class CommandStatus(str, Enum)`),
-        so returning the raw DB string here is interchangeable with the
-        enum-wrapped value get_job_detail() returns for every comparison
-        this codebase does against it.
+        Listing episodes otherwise calls get_job_detail() once per episode —
+        O(n) round trips. Keys are always canonical `command:…` strings so
+        router lookups via command_status_key() never miss a row because of
+        RecordID vs str formatting.
         """
         ids = [cid for cid in command_ids if cid]
         grouped: Dict[str, dict] = {}
         if not ids:
             return grouped
         try:
+            from open_notebook.jobs import (
+                coerce_status_detail,
+                fail_stale_running_commands,
+            )
+
+            try:
+                await fail_stale_running_commands()
+            except Exception as reap_err:
+                logger.warning(f"Stale command reaper skipped: {reap_err}")
             result = await repo_query(
-                "SELECT * FROM command WHERE id IN $command_ids",
+                "SELECT id, status, error_message, updated FROM command WHERE id IN $command_ids",
                 {"command_ids": [ensure_record_id(cid) for cid in ids]},
             )
         except Exception as e:
             logger.error(f"Error batch-fetching command status: {e}")
             return grouped
-        for row in result:
-            grouped[str(row.get("id"))] = {
-                "status": row.get("status", "unknown"),
-                "error_message": row.get("error_message"),
-            }
+        for row in result or []:
+            detail = cls._normalize_command_status_detail(
+                {
+                    "status": row.get("status", "unknown"),
+                    "error_message": row.get("error_message"),
+                    "updated": str(row.get("updated"))
+                    if row.get("updated") is not None
+                    else None,
+                }
+            )
+            key = cls.command_status_key(row.get("id"))
+            if key:
+                grouped[key] = coerce_status_detail(detail)
         return grouped
 
     @field_validator("command", mode="before")
@@ -329,11 +563,16 @@ class PodcastEpisode(ObjectModel):
         return value
 
     def _prepare_save_data(self) -> dict:
-        """Override to ensure command field is always RecordID format for database"""
-        data = super()._prepare_save_data()
+        """Ensure record-typed fields stay RecordIDs for SurrealDB.
 
-        # Ensure command field is RecordID format if not None
+        A second earlier override only converted notebook and was shadowed by
+        this method (command-only). That left notebook as a plain string on
+        create, Surreal rejected option<record<notebook>>, and the job died
+        before any episode row existed — so generate looked like a silent no-op.
+        """
+        data = super()._prepare_save_data()
         if data.get("command") is not None:
             data["command"] = ensure_record_id(data["command"])
-
+        if data.get("notebook") is not None:
+            data["notebook"] = ensure_record_id(data["notebook"])
         return data

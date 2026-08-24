@@ -99,7 +99,7 @@ async def trigger_queries(state: ThreadState, config: RunnableConfig):
 
 async def provide_answer(state: SubGraphState, config: RunnableConfig) -> dict:
     try:
-        payload = state
+        payload = dict(state)
         # if state["type"] == "text":
         #     results = text_search(state["term"], 10, True, True)
         # else:
@@ -111,7 +111,7 @@ async def provide_answer(state: SubGraphState, config: RunnableConfig) -> dict:
         payload["ids"] = ids
         system_prompt = Prompter(prompt_template="ask/query_process").render(
             data=payload
-        )  # type: ignore[arg-type]
+        )
         model = await provision_langchain_model(
             system_prompt,
             config.get("configurable", {}).get("answer_model"),

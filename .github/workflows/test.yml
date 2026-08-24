@@ -6,7 +6,7 @@ on:
   # mismatches like listEpisodes(notebookId?) vs React Query context.
   pull_request:
   push:
-    branches: [main]
+    branches: [install]
     paths-ignore:
       - '**.md'
       - 'docs/**'

@@ -7,10 +7,6 @@ on:
   pull_request:
   push:
     branches: [install]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/workflows/claude*.yml'
   # On-demand runs for any branch without opening a PR.
   workflow_dispatch:
 
@@ -18,6 +14,27 @@ permissions:
   contents: read
 
 jobs:
+  git-guards:
+    name: Approved Git guards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Prove the checked-in approved hook blocks
+        run: |
+          set -euo pipefail
+          bash -n .githooks/pre-commit
+          git config --local core.hooksPath .githooks
+          # Assemble a synthetic token shape at runtime: no credential value is
+          # stored in this workflow, and hook output is suppressed.
+          printf 'github_%s_%s\n' 'pat' 'AAAAAAAAAAAAAAAAAAAAAAAA' > .ci-hook-selftest.txt
+          git add -f .ci-hook-selftest.txt
+          if git hook run pre-commit >/dev/null 2>&1; then
+            echo "::error::approved secret guard did not block its self-test"
+            exit 1
+          fi
+
   backend:
     name: Backend Tests
     runs-on: ubuntu-latest

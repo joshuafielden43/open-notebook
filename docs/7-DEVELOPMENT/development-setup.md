@@ -256,9 +256,9 @@ cd frontend && npm run dev
 
 ### Pre-commit Hooks (Optional but Recommended)
 
-Pre-commit hooks run configured checks automatically before each commit,
-mirroring the CI gates so local commits fail for the same reasons PRs
-would. The config at `.pre-commit-config.yaml` wires up:
+The maintained repository has two local check layers. The approved checked-in
+Git hook runs automatically once activated. The broader
+`.pre-commit-config.yaml` suite remains available for manual all-file checks:
 
 | Tool | What it checks | CI equivalent |
 |------|----------------|---------------|
@@ -267,11 +267,12 @@ would. The config at `.pre-commit-config.yaml` wires up:
 | **mypy** | Python type correctness | `python -m mypy .` |
 | **pre-commit-hooks** | Large files, merge conflicts, YAML/TOML syntax, trailing whitespace, EOF newlines | — |
 
-Pre-commit is already included in the project's dev dependencies. Install
-the hooks and they'll run on every `git commit`:
+This maintained repository includes the already-approved
+`claude-config/git-hardening/pre-commit-guards` hook at
+`.githooks/pre-commit`. Activate that checked-in hook after cloning:
 
 ```bash
-uv run pre-commit install
+git config --local core.hooksPath .githooks
 ```
 
 **Running manually:**
@@ -284,20 +285,12 @@ uv run pre-commit run --all-files
 uv run pre-commit run ruff --all-files
 ```
 
-**Skipping hooks temporarily:**
-
-```bash
-# Skip a specific hook (e.g. slow mypy run)
-SKIP=mypy git commit
-```
-
-This fork also carries the git-hardening secrets guard
-(`claude-config/git-hardening`, installed at `.git/hooks/pre-commit`; the
-pre-commit framework chains it as a legacy hook when both are installed).
+The approved git-hardening secrets guard is versioned with this fork and CI
+self-tests it on every `install` push. Do not replace it with a project-specific
+hook implementation.
 Known-safe token-shaped fixtures — expired presigned URLs and the like — are
 excused via exact, byte-for-byte literals in `.git/secret-allowlist`; never
-substrings or patterns. The guard and its allowlist are not cloned, so
-re-install both after a fresh clone.
+substrings or patterns. The allowlist is intentionally local and is not cloned.
 
 **Updating hook versions:**
 

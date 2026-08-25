@@ -38,6 +38,9 @@ explicit decision by the operator.
 
 - Source, commit history, Actions history, and logs are treated as public.
 - Secrets and deployment data must never enter commits or CI output.
+- The approved `claude-config/git-hardening` hook is checked in at
+  `.githooks/pre-commit`, enabled through `core.hooksPath`, and self-tested by
+  CI. GitHub secret-scanning push protection remains enabled.
 - Upstream reconciliation remains automatic and failures create an issue in
   this repository in addition to GitHub's workflow notification.
 - `install`, not an old feature branch, is the maintained deployment line.

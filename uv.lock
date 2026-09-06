@@ -208,15 +208,6 @@ wheels = [
 ]
 
 [[package]]
-name = "asciidoc"
-version = "10.2.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1d/e7/315a82f2d256e9270977aa3c15e8fe281fd7c40b8e2a0b97e0cb61ca8fa0/asciidoc-10.2.1.tar.gz", hash = "sha256:d9f13c285981b3c7eb660d02ca0a2779981e88d48105de81bb40445e60dddb83", size = 230179, upload-time = "2024-07-17T03:12:52.681Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/75/1f/87941eaa96e86aa22086064f67e4187e2710fb76c147312979ea29278dac/asciidoc-10.2.1-py2.py3-none-any.whl", hash = "sha256:3f277a636b617c9ce7e0b87bcaea51f144500e9a5c8a6488421ee24594850d40", size = 272433, upload-time = "2024-07-17T03:12:49.012Z" },
-]
-
-[[package]]
 name = "asttokens"
 version = "3.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -472,12 +463,11 @@ wheels = [
 
 [[package]]
 name = "content-core"
-version = "2.0.4"
+version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ai-prompter" },
     { name = "aiohttp" },
-    { name = "asciidoc" },
     { name = "bs4" },
     { name = "click" },
     { name = "esperanto" },
@@ -502,9 +492,9 @@ dependencies = [
     { name = "validators" },
     { name = "youtube-transcript-api" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6a/59/acad9436e3b187d44e3d4676e572fcaa289a2f84e1d573690b080dbd02ac/content_core-2.0.4.tar.gz", hash = "sha256:bfbc7877e6c1ac8762e5e5bb953ddfbd817548c5c5404f5aa651a6135dfdf9c0", size = 20467845, upload-time = "2026-07-12T14:24:50.104Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/71/4c3c5e9d95307fddf384c4332c2373b76892095b083ffc3191b862b54576/content_core-2.1.0.tar.gz", hash = "sha256:8bab8f09041d9c9da8182b2ca758bdc04d679ee1bb59d69eeeed1ff17d663124", size = 19204198, upload-time = "2026-09-06T14:56:54.703Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/18/7c/50e546c2e7a9aa164d2b655b4e2f7b2666712a2c48284e88e8e1f138cdf3/content_core-2.0.4-py3-none-any.whl", hash = "sha256:673dd51faa40dd3012f611572287bd18e8b0504e3569f96f4a69fc3d10e0cc8f", size = 58190, upload-time = "2026-07-12T14:24:47.622Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/ce/abc26bc8f0e6eb6a160a6ae47cdd0e15d9d6a68eb8f40053f3aa381e7f97/content_core-2.1.0-py3-none-any.whl", hash = "sha256:52598b9b3e399bf2433637080106d2712a1043991ee3397200632919c412be98", size = 64650, upload-time = "2026-09-06T14:56:53.084Z" },
 ]
 
 [package.optional-dependencies]
@@ -954,15 +944,15 @@ wheels = [
 
 [[package]]
 name = "esperanto"
-version = "2.25.1"
+version = "2.27.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/af/ff32061132276f1f509fe8343bf1ad462d639c9cda4e7f9487f68103e409/esperanto-2.25.1.tar.gz", hash = "sha256:335476f746d7055b0790c0cad2a37b56ad2df3ac1f07ae88aef0bb48f3bf34b8", size = 751470, upload-time = "2026-07-19T14:31:52.104Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0e/a9/798df6ef7efa5f958a7a4295d722bfe89ab45184a627dd08b206f62292c4/esperanto-2.27.0.tar.gz", hash = "sha256:8a20349e2c64e7377d8018e1448531fe9842383eddcc9dcde6f1721a2ebc00ef", size = 788357, upload-time = "2026-09-05T23:22:57.633Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/39/46b70b990d72e040691db22b1618e7e75bfe3b7f83b87df53cf85716578e/esperanto-2.25.1-py3-none-any.whl", hash = "sha256:db900cd10ebb921a34fe57d95879f77581564412c346cddbd46194c3d5911b70", size = 256893, upload-time = "2026-07-19T14:31:50.823Z" },
+    { url = "https://files.pythonhosted.org/packages/73/e5/32a296f076c572a37f18e28e7581b8d4bb3dd86cdea2ca1da8ccf97a9ae3/esperanto-2.27.0-py3-none-any.whl", hash = "sha256:13324bb77989621925d06f857590f20493a3c2df3226a1e7fc00de9f6b375b94", size = 268454, upload-time = "2026-09-05T23:22:56.095Z" },
 ]
 
 [[package]]
@@ -2645,7 +2635,7 @@ notebooks = [
 requires-dist = [
     { name = "ai-prompter", specifier = ">=0.4,<1" },
     { name = "babel", specifier = ">=2.18.0" },
-    { name = "content-core", extras = ["docling"], specifier = ">=2.0.4,<3" },
+    { name = "content-core", extras = ["docling"], specifier = ">=2.0.7,<3" },
     { name = "esperanto", specifier = ">=2.25.1,<3" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },

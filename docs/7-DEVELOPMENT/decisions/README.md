@@ -55,6 +55,7 @@ What this makes easier, what it makes harder, what to watch. (bullets)
 | [ADR-013](ADR-013-podcast-creator-orchestration-parked.md) | Open Notebook orchestrates podcast-creator stages (adapter parked) | Accepted |
 | [ADR-014](ADR-014-runtime-vector-index.md) | Dimension-adaptive vector indexes provisioned at runtime | Accepted |
 | [ADR-015](ADR-015-watchdog-birth-certificate.md) | Stale-job reaper stamps newborns instead of killing them | Accepted |
+| [ADR-016](ADR-016-notebook-scoped-search.md) | Notebook scope is an optional filter on the existing search functions | Accepted |
 | [PDR-001](PDR-001-single-user-first.md) | Single-user first; don't preclude multi-user | Accepted |
 | [PDR-002](PDR-002-provider-agnostic-core.md) | Provider-agnostic core by default | Accepted |
 | [PDR-003](PDR-003-fork-install-posture.md) | This fork is an install, not the product | Accepted |

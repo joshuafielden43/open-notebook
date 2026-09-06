@@ -8,7 +8,7 @@ from surreal_commands import CommandInput, CommandOutput, command
 from open_notebook.database.repository import ensure_record_id
 from open_notebook.domain.notebook import Source
 from open_notebook.domain.transformation import Transformation
-from open_notebook.exceptions import ConfigurationError
+from open_notebook.exceptions import ConfigurationError, ContextLengthExceededError
 
 try:
     from open_notebook.graphs.source import source_graph
@@ -46,6 +46,7 @@ class SourceProcessingOutput(CommandOutput):
         "stop_on": [
             ValueError,
             ConfigurationError,
+            ContextLengthExceededError,
         ],  # Don't retry validation/config errors
         "retry_log_level": "debug",  # Avoid log noise during transaction conflicts
     },
@@ -188,6 +189,7 @@ class RunTransformationOutput(CommandOutput):
         "stop_on": [
             ValueError,
             ConfigurationError,
+            ContextLengthExceededError,
         ],  # Don't retry validation/config errors
         "retry_log_level": "debug",
     },

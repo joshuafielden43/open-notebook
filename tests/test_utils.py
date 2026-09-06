@@ -71,6 +71,14 @@ class TestTextUtilities:
         assert thinking == "Some thinking content"
         assert cleaned == "Here is my answer"
 
+    def test_parse_thinking_content_truncated_no_close_tag(self):
+        """Output cut off inside <think> is all reasoning, never an answer."""
+        content = "<think>Let me reason about this at length and then"
+        thinking, cleaned = parse_thinking_content(content)
+        assert thinking == "Let me reason about this at length and then"
+        assert cleaned == ""
+        assert clean_thinking_content("  <think>partial") == ""
+
     def test_parse_thinking_content_invalid_input(self):
         """Test parsing with invalid input types."""
         # Non-string input (intentionally violates the signature to test the

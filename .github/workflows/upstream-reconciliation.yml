@@ -29,6 +29,10 @@ jobs:
         with:
           ref: install
           fetch-depth: 0
+          # The reconciliation token is supplied only to the two push steps
+          # below. Do not leave any credential in Git's persisted config while
+          # validating merged upstream code.
+          persist-credentials: false
 
       - name: Verify public standalone boundary
         env:
@@ -49,10 +53,15 @@ jobs:
           git fetch --prune upstream main
 
       - name: Fast-forward maintained main mirror
+        env:
+          UPSTREAM_RECONCILIATION_TOKEN: ${{ secrets.UPSTREAM_RECONCILIATION_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "${UPSTREAM_RECONCILIATION_TOKEN}"
           if git merge-base --is-ancestor origin/main upstream/main; then
-            git push origin upstream/main:main
+            git push \
+              "https://x-access-token:${UPSTREAM_RECONCILIATION_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              upstream/main:main
           else
             echo "::error::maintained main diverged from upstream/main; refusing to rewrite it"
             git rev-list --left-right --count origin/main...upstream/main
@@ -119,9 +128,14 @@ jobs:
 
       - name: Publish tested install merge
         if: steps.merge.outputs.changed == 'true'
+        env:
+          UPSTREAM_RECONCILIATION_TOKEN: ${{ secrets.UPSTREAM_RECONCILIATION_TOKEN }}
         run: |
           set -euo pipefail
-          git push origin HEAD:install
+          test -n "${UPSTREAM_RECONCILIATION_TOKEN}"
+          git push \
+            "https://x-access-token:${UPSTREAM_RECONCILIATION_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:install
           git fetch origin install
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/install)"
 

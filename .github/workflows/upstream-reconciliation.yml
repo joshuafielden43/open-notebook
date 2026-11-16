@@ -1,11 +1,12 @@
 name: Upstream Reconciliation
 
 on:
-  schedule:
-    # Daily at 08:00 America/Los_Angeles. GitHub evaluates the timezone here,
-    # so daylight-saving changes do not shift the operator-facing run time.
-    - cron: '0 8 * * *'
-      timezone: America/Los_Angeles
+  # schedule disabled 2026-09-13 to stop burning Actions minutes (repo over free-tier cap)
+  # schedule:
+  #   # Daily at 08:00 America/Los_Angeles. GitHub evaluates the timezone here,
+  #   # so daylight-saving changes do not shift the operator-facing run time.
+  #   - cron: '0 8 * * *'
+  #     timezone: America/Los_Angeles
   workflow_dispatch:
 
 concurrency:
